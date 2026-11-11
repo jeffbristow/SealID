@@ -33,7 +33,6 @@ $proofs = own_proofs();
 $received = jread('vouches.json', []);
 $given = array_reverse(array_values($st['vouches']));
 $name = $st['name'] !== '' ? $st['name'] : parse_url($st['url'], PHP_URL_HOST);
-$initial = mb_strtoupper(mb_substr($name, 0, 1));
 $verifiedCount = count(array_filter($proofs, fn($p) => in_array($p['status'], ['verified', 'witnessed'], true)));
 
 page_start($name . ' — Seal ID', [
@@ -46,7 +45,7 @@ page_start($name . ' — Seal ID', [
 <section class="hero">
   <div class="wrap">
     <div class="idcard">
-      <div class="avatar" aria-hidden="true"><?= h($initial) ?></div>
+      <?= avatar_html(avatar_url(), $name) ?>
       <div class="grow">
         <h1><?= h($name) ?></h1>
         <div class="idurl"><?= h($st['url']) ?></div>
@@ -99,9 +98,12 @@ page_start($name . ' — Seal ID', [
       <?php else: ?>
       <ul class="vlist">
         <?php foreach ($received as $v): ?>
-        <li>
-          <a href="<?= h($v['url']) ?>" target="_blank" rel="noopener"><?= h($v['name'] !== '' ? $v['name'] : $v['url']) ?></a>
-          <div class="tiny muted"><?= h($v['url']) ?> · <?= h(ago((int)$v['ts'])) ?> · confirmed <?= count($v['proofs']) ?> proof<?= count($v['proofs']) === 1 ? '' : 's' ?></div>
+        <li class="row">
+          <?= avatar_html($v['avatar'] ?? null, (string)($v['name'] ?? ''), 'avatar sm') ?>
+          <div class="grow">
+            <a href="<?= h($v['url']) ?>" target="_blank" rel="noopener"><?= h($v['name'] !== '' ? $v['name'] : $v['url']) ?></a>
+            <div class="tiny muted"><?= h($v['url']) ?> · <?= h(ago((int)$v['ts'])) ?> · confirmed <?= count($v['proofs']) ?> proof<?= count($v['proofs']) === 1 ? '' : 's' ?></div>
+          </div>
         </li>
         <?php endforeach; ?>
       </ul>

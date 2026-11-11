@@ -5,3 +5,4 @@ src/.well-known/
 .sealid-data/
 *.tmp*
 node_modules/
+dist/

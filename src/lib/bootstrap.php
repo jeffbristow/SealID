@@ -5,7 +5,7 @@
  */
 declare(strict_types=1);
 
-const SEALID_VERSION = '1.0.0';
+const SEALID_VERSION = '1.1.0';
 const SEALID_REPO = 'https://github.com/jeffbristow/SealID';
 define('SEALID_ROOT', dirname(__DIR__));
 
@@ -21,6 +21,8 @@ require_once __DIR__ . '/chain.php';
 require_once __DIR__ . '/proofs.php';
 require_once __DIR__ . '/peers.php';
 require_once __DIR__ . '/view.php';
+require_once __DIR__ . '/avatar.php';
+require_once __DIR__ . '/update.php';
 
 function cfg(string $key, mixed $default = null): mixed
 {
@@ -125,9 +127,9 @@ function detected_base_url(): string
     return 'https://' . $host . $dir;
 }
 
-function body_json(): array
+function body_json(int $max = 262144): array
 {
-    $raw = file_get_contents('php://input', false, null, 0, 256 * 1024);
+    $raw = file_get_contents('php://input', false, null, 0, $max);
     $j = json_decode((string)$raw, true);
     return is_array($j) ? $j : [];
 }

@@ -71,7 +71,7 @@ final class Chain
         if (count($links) > 5000) throw new ChainError('The chain is too long.');
         $st = [
             'url' => $url, 'fp' => null, 'key' => null, 'seq' => 0, 'hash' => null,
-            'name' => '', 'bio' => '', 'created' => 0, 'updated' => 0, 'reset_from' => null,
+            'name' => '', 'bio' => '', 'avatar' => null, 'created' => 0, 'updated' => 0, 'reset_from' => null,
             'proofs' => [], 'vouches' => [], 'mirrors' => [], 'revoked' => [], 'fps' => [],
             'hashes' => [], 'payloads' => [], 'types' => [], 'keys' => [],
         ];
@@ -132,6 +132,10 @@ final class Chain
                 case 'profile':
                     $st['name'] = self::str($body['name'] ?? '', 80, $seq, 'name');
                     $st['bio'] = self::str($body['bio'] ?? '', 500, $seq, 'bio');
+                    // 1.1.0: optional profile picture, pinned by its SHA-256.
+                    $av = $body['avatar'] ?? null;
+                    if ($av !== null && (!is_string($av) || !preg_match('/^[0-9a-f]{64}$/', $av))) throw new ChainError('Bad avatar hash.', $seq);
+                    $st['avatar'] = $av;
                     if ($type === 'eldest' && isset($body['reset_from'])) {
                         if (!is_string($body['reset_from']) || !preg_match(self::HEX, $body['reset_from'])) throw new ChainError('Bad reset_from.', $seq);
                         $st['reset_from'] = $body['reset_from'];
@@ -341,6 +345,8 @@ final class Chain
             'locators' => (object)$locators,
             'vouched_by' => $vb,
             'checks' => (object)$checks,
+            // 1.1.0: where to fetch the profile picture; its hash is signed in the chain.
+            'avatar' => ($av = avatar_current()) ? ['url' => 'api.php?a=avatar&h=' . substr($av['sha'], 0, 16), 'sha256' => $av['sha'], 'type' => $av['mime']] : null,
             'software' => 'SealID/' . SEALID_VERSION,
             'updated' => time(),
         ];

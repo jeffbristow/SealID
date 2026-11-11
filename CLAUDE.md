@@ -26,6 +26,9 @@ green design (`src/assets/site.css`), logo `src/assets/seal-id.svg`.
 | `src/lib/proofs/*.php` | one checker per service |
 | `src/lib/peers.php` | fetching/verifying other identities, pinning, vouches, inbox |
 | `src/lib/view.php` | shared HTML (head, header, footer) |
+| `src/lib/avatar.php` | profile picture: GD re-draw, pending → signed, serving, peer fetch (1.1.0) |
+| `src/lib/update.php` | one-click updates from signed GitHub release packages, undo (1.1.0) |
+| `tools/release.mjs` | builds + signs `dist/SealID-<v>.zip(.sig)` from the tag |
 | `src/assets/` | css, logo, admin.js, sign.js, bundled OpenPGP.js 6.3.2 (LGPL) |
 | `tests/` | CLI tests: `php tests/run.php` (fixtures made by `node tests/make-fixtures.mjs`) |
 
@@ -52,6 +55,17 @@ checks). Node 20+ runs the fixture generators with the bundled OpenPGP.js;
 Live tests (need a real host): `tests/live-proofs.php` (run ON the server:
 can it reach every service?) and `tests/e2e-peer.mjs` (two installs on real
 https addresses: proofs, vouching, inbox, withdrawal, mirror fallback).
+
+## Releases
+
+- Version lives in `SEALID_VERSION` (src/lib/bootstrap.php). Bump, commit, tag `v<x.y.z>`, push.
+- `node tools/release.mjs` builds the zip FROM THE TAG and signs it with the Ed25519 key at
+  `~/.sealid/update-signing-key.pem` (never commit, never upload). It checks the signature
+  against `UPDATE_PUBKEY` in src/lib/update.php.
+- GitHub release `v<x.y.z>` must carry exactly `SealID-<x.y.z>.zip` and `SealID-<x.y.z>.zip.sig`,
+  must not be a draft/prerelease (installs read /releases/latest). Notes: bullets under
+  "## New in Seal ID x.y.z" (the admin page shows the first bullets).
+- Changing the signing key means every install must be updated by hand once.
 
 ## Hosting lessons
 

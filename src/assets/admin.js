@@ -50,7 +50,10 @@ function ago(ts) {
 const LABELS = { verified: 'Verified', failed: 'Failed', unreachable: 'Not reachable right now', pending: 'Pending', witnessed: 'Witnessed', unsupported: 'Not supported here' };
 const badge = (s, title) => el('span', { class: 'badge s-' + s, title: title || '' }, LABELS[s] || s);
 const LETTERS = { web: 'W', dns: 'D', github: 'GH', x: 'X', mastodon: 'M', bluesky: 'B', hackernews: 'Y', reddit: 'R', youtube: 'YT', facebook: 'F' };
-const svc = id => el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
+const avatarEl = (src, name, cls = 'avatar') => src
+  ? el('img', { class: cls + ' avatar-img', src, alt: '' })
+  : el('div', { class: cls, 'aria-hidden': 'true' }, (name || '?').slice(0, 1).toUpperCase());
+const svc = id =>el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
 
 /* ------------------------------------------------------------------ *
  * Sign-in
@@ -93,6 +96,12 @@ function renderLogin() {
 async function load() {
   await api('state');
   render();
+  // Ask GitHub (at most every 12 h, server-side) in the background; only redraw if something new appeared.
+  api('update_status').then(r => {
+    const had = S.update && S.update.update && S.update.update.version;
+    S.update = r.update;
+    if (r.update.update && r.update.update.version !== had) render();
+  }).catch(() => {});
 }
 
 function keyBar() {
@@ -127,11 +136,17 @@ function render() {
   const body = el('div');
   const tabBar = el('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) =>
     el('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(tab === id), onclick: () => { tab = id; render(); } }, label)));
+  const up = S.update && S.update.update;
+  const banner = up ? el('div', { class: 'notice ok update-banner' },
+    el('span', { class: 'grow' }, el('b', {}, 'Seal ID ' + up.version + ' is available.'), ' You have ' + S.update.current + '.'),
+    el('button', { class: 'btn small', type: 'button', onclick: () => { tab = 'settings'; render(); document.getElementById('updates')?.scrollIntoView({ behavior: 'smooth' }); } }, 'See what’s new')) : null;
   app.replaceChildren(
     el('div', { class: 'row between' },
-      el('div', {}, el('h1', { class: 'mb0' }, I.name || 'Seal ID'), el('div', { class: 'idurl' }, I.url)),
+      el('div', { class: 'row' }, avatarEl(I.avatar_url, I.name),
+        el('div', {}, el('h1', { class: 'mb0' }, I.name || 'Seal ID'), el('div', { class: 'idurl' }, I.url))),
       el('button', { class: 'btn small ghost', type: 'button', onclick: async () => { await api('logout').catch(() => {}); signer.forget(); location.reload(); } }, 'Sign out')),
     el('div', { class: 'fp mt' }, fpGroups(I.fp), ' · ', I.algo, ' · ', I.seq + ' signed statements'),
+    banner || "",
     el('div', { class: 'mt' }, keyBar()),
     tabBar, body);
   ({ proofs: renderProofs, vouch: renderVouch, profile: renderProfile, settings: renderSettings })[tab](body);
@@ -293,7 +308,7 @@ function drawReport(out, r) {
   }
   r.warnings.forEach(w => box.append(el('div', { class: 'notice warn' }, w)));
   box.append(el('div', { class: 'peer-head' },
-    el('div', { class: 'avatar' }, (r.name || '?').slice(0, 1).toUpperCase()),
+    avatarEl(r.avatar, r.name),
     el('div', {}, el('h3', { class: 'mb0' }, r.name || r.url), el('div', { class: 'idurl' }, r.url),
       el('div', { class: 'fp' }, fpGroups(r.fp) + ' · ' + r.algo),
       el('div', { class: 'tiny muted' }, r.seq + ' signed statements · ' + (r.pin === 'match' ? 'same identity as before' : r.pin === 'new' ? 'first time seen' : r.pin) + (r.dns && r.dns.fp === r.fp ? ' · key confirmed by DNS' : '')))));
@@ -337,16 +352,62 @@ function drawReport(out, r) {
 /* ------------------------------------------------------------------ *
  * Profile tab
  * ------------------------------------------------------------------ */
+/** Crop to a centred square and scale down in the browser before uploading. */
+async function squareImage(file, size = 512) {
+  const bmp = await createImageBitmap(file);
+  const side = Math.min(bmp.width, bmp.height);
+  const out = Math.min(size, side);
+  const c = document.createElement('canvas');
+  c.width = c.height = out;
+  c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, out, out);
+  bmp.close && bmp.close();
+  const webp = c.toDataURL('image/webp', 0.9);
+  return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/png');
+}
+
 function renderProfile(root) {
-  const name = el('input', { type: 'text', value: S.identity.name, maxlength: 80 });
+  const I = S.identity;
+  const name = el('input', { type: 'text', value: I.name, maxlength: 80 });
   const bio = el('textarea', { maxlength: 500 });
-  bio.value = S.identity.bio;
+  bio.value = I.bio;
+  // undefined = unchanged, null = removed, sha = newly uploaded
+  let picture;
+  const preview = el('div');
+  const showPreview = src => preview.replaceChildren(avatarEl(src, name.value || I.name, 'avatar lg'));
+  showPreview(I.avatar_url);
+  const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', class: 'hidden' });
+  const choose = el('button', { class: 'btn small', type: 'button', onclick: () => file.click() }, I.avatar ? 'Change picture' : 'Add a picture');
+  const remove = el('button', { class: 'btn small danger', type: 'button' }, 'Remove');
+  remove.classList.toggle('hidden', !I.avatar);
+  const note = el('div', { class: 'tiny muted' }, 'Square pictures work best; others are cropped to the centre. Saved as part of your signed profile.');
+  file.addEventListener('change', () => busy(choose, async () => {
+    const f = file.files[0];
+    if (!f) return;
+    let data;
+    try { data = await squareImage(f); } catch { throw new Error('That picture could not be opened here. Try a PNG or JPEG.'); }
+    const r = await api('avatar_upload', { image: data });
+    picture = r.sha;
+    showPreview(r.data);
+    remove.classList.remove('hidden');
+    note.textContent = 'New picture ready — press “Sign and save” to publish it.';
+    file.value = '';
+  }));
+  remove.addEventListener('click', () => {
+    picture = null;
+    showPreview(null);
+    remove.classList.add('hidden');
+    note.textContent = 'The picture will be removed when you sign and save.';
+  });
   const save = el('button', { class: 'btn primary', type: 'button' }, 'Sign and save');
   save.addEventListener('click', () => busy(save, async () => {
-    const r = await signStatement({ type: 'profile', name: name.value, bio: bio.value }, 'Update your profile');
+    const avatar = picture === undefined ? (I.avatar || null) : picture;
+    const r = await signStatement({ type: 'profile', name: name.value, bio: bio.value, avatar }, 'Update your profile',
+      avatar && avatar !== I.avatar ? 'Your signed profile will include the new picture’s fingerprint (SHA-256), so nobody can swap it.' : undefined);
     if (r) { render(); toast('Saved.'); }
   }));
   root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Profile'),
+    el('div', { class: 'field' }, el('label', {}, 'Picture'),
+      el('div', { class: 'avatar-edit' }, preview, el('div', { class: 'stack' }, el('div', { class: 'row wrapline' }, choose, remove), note)), file),
     el('div', { class: 'field' }, el('label', {}, 'Display name'), name),
     el('div', { class: 'field' }, el('label', {}, 'Bio'), bio), save));
 }
@@ -354,8 +415,43 @@ function renderProfile(root) {
 /* ------------------------------------------------------------------ *
  * Settings tab
  * ------------------------------------------------------------------ */
+function updatesCard() {
+  const U = S.update || {};
+  const box = el('div', { class: 'card stack', id: 'updates' }, el('h2', {}, 'Updates'));
+  const redraw = u => { S.update = u; render(); };
+  const check = el('button', { class: 'btn small', type: 'button' }, 'Check now');
+  check.addEventListener('click', () => busy(check, async () => { const r = await api('update_check'); redraw(r.update); toast(r.update.update ? 'An update is available.' : 'You have the newest version.'); }));
+  box.append(el('p', { class: 'small muted' },
+    'This is Seal ID ' + U.current + '. ',
+    U.checked ? 'Last checked ' + ago(U.checked) + (U.latest ? ' — newest release: ' + U.latest + '.' : '.') : 'Not checked yet.'),
+    U.error && !U.latest ? el('div', { class: 'notice warn' }, 'Couldn’t check GitHub: ' + U.error) : null);
+  if (U.update) {
+    const go = el('button', { class: 'btn primary', type: 'button' }, 'Update to ' + U.update.version);
+    go.addEventListener('click', () => busy(go, async () => {
+      const r = await api('update_install');
+      toast(r.message);
+      setTimeout(() => location.reload(), 1200);   // load the new admin page
+    }));
+    box.append(el('div', { class: 'notice ok stack' },
+      el('b', {}, 'Seal ID ' + U.update.version + ' is available.'),
+      U.update.notes && U.update.notes.length ? el('ul', { class: 'notes' }, U.update.notes.map(n => el('li', {}, n))) : null,
+      U.update.url ? el('a', { href: U.update.url, target: '_blank', rel: 'noopener', class: 'small' }, 'Release notes on GitHub') : null,
+      U.blockers && U.blockers.length ? el('div', { class: 'notice bad' }, 'Can’t update here: ' + U.blockers.join('; ')) : el('div', { class: 'row wrapline' }, go,
+        el('span', { class: 'tiny muted' }, 'Downloads the signed package from GitHub, checks its signature, keeps a backup. Your data and config.php are never touched.'))));
+  }
+  const row = el('div', { class: 'row wrapline' }, check);
+  if (U.undo) {
+    const undo = el('button', { class: 'btn small danger', type: 'button' }, 'Undo last update (back to ' + U.undo + ')');
+    undo.addEventListener('click', () => busy(undo, async () => { const r = await api('update_undo'); toast(r.message); setTimeout(() => location.reload(), 1200); }));
+    row.append(undo);
+  }
+  box.append(row);
+  return box;
+}
+
 function renderSettings(root) {
   const I = S.identity;
+  root.append(updatesCard());
 
   // Reachability
   const reachOut = el('div');

@@ -26,7 +26,7 @@ $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
 if ($isPost) {
     csrf_check();
     $a = (string)($_GET['a'] ?? '');
-    $b = body_json();
+    $b = body_json($a === 'avatar_upload' ? 8 * 1048576 : 262144);
     try {
         if (!empty($st['broken'])) fail(500, 'Your chain failed verification: ' . $st['broken']);
 
@@ -92,6 +92,10 @@ if ($isPost) {
                     if (isset($_SESSION['peer'][$p['body']['target']])) peer_pin_save($_SESSION['peer'][$p['body']['target']]);
                     $extra['notify'] = vouch_notify($p['body']['target'], $p['seq']);
                 }
+                if ($p['type'] === 'profile') {
+                    avatar_commit($p['body']['avatar'] ?? null);
+                    Chain::writeBundle();
+                }
                 if ($p['type'] === 'proof') {
                     $extra['proof'] = admin_instructions($p['seq']);
                     if (!proof_service($p['body']['service'])::LOCATOR) own_recheck(1, true, $p['seq']);
@@ -152,6 +156,32 @@ if ($isPost) {
                 if (!$v) fail(404, 'No such vouch.');
                 json_out(['ok' => true, 'notify' => vouch_notify($v['target'], $seq)] + admin_state());
 
+            // ---------------- Profile picture ----------------
+            case 'avatar_upload':
+                if (!preg_match('#^data:image/[a-z+.-]+;base64,(.+)$#s', (string)($b['image'] ?? ''), $m)) fail(400, 'Choose a picture.');
+                $bytes = base64_decode($m[1], true);
+                if ($bytes === false) fail(400, 'That picture could not be read.');
+                try { $r = avatar_store_pending($bytes); } catch (RuntimeException $e) { fail(400, $e->getMessage()); }
+                json_out(['ok' => true] + $r);
+
+            // ---------------- Updates ----------------
+            case 'update_status':
+                json_out(['ok' => true, 'update' => up_state(up_check(false))]);
+
+            case 'update_check':
+                $c = jread('update/check.json', []);
+                json_out(['ok' => true, 'update' => up_state(up_check(time() - (int)($c['checked'] ?? 0) >= 60))]);
+
+            case 'update_install':
+                [$ok, $msg] = up_install();
+                if (!$ok) json_out(['ok' => false, 'error' => $msg, 'update' => up_state()], 409);
+                json_out(['ok' => true, 'message' => $msg, 'update' => up_state()]);
+
+            case 'update_undo':
+                [$ok, $msg] = up_restore();
+                if (!$ok) json_out(['ok' => false, 'error' => $msg, 'update' => up_state()], 409);
+                json_out(['ok' => true, 'message' => $msg, 'update' => up_state()]);
+
             // ---------------- Settings ----------------
             case 'update_key':
                 try { Chain::updateKey((string)($b['key'] ?? '')); } catch (ChainError | PgpError $e) { fail(400, $e->getMessage()); }
@@ -197,7 +227,13 @@ function admin_prepare(array $b, array $st): string
             $bio = trim((string)($b['bio'] ?? ''));
             if ($name === '' || mb_strlen($name) > 80) fail(400, 'Enter a display name (up to 80 characters).');
             if (mb_strlen($bio) > 500) fail(400, 'The bio can be up to 500 characters.');
-            return Chain::nextPayload('profile', ['name' => $name, 'bio' => $bio]);
+            $body = ['name' => $name, 'bio' => $bio];
+            $av = $b['avatar'] ?? null;
+            if ($av !== null) {
+                if (!is_string($av) || !preg_match('/^[0-9a-f]{64}$/', $av) || !avatar_known($av)) fail(400, 'Upload the picture again.');
+                $body['avatar'] = $av;
+            }
+            return Chain::nextPayload('profile', $body);
 
         case 'proof':
             $cls = proof_service((string)($b['service'] ?? ''));
@@ -287,6 +323,7 @@ function admin_state(): array
     return [
         'identity' => [
             'url' => $st['url'], 'name' => $st['name'], 'bio' => $st['bio'], 'fp' => $st['fp'],
+            'avatar' => $st['avatar'] ?? null, 'avatar_url' => avatar_url(),
             'algo' => Pgp::algoName($st['parsed_key']['primary']), 'seq' => $st['seq'], 'created' => $st['created'],
             'reset_from' => $st['reset_from'], 'fps' => $st['fps'],
         ],
@@ -301,7 +338,8 @@ function admin_state(): array
         'has_password' => !empty($auth['password']),
         'reach_helper' => cfg('reach_helper', 'https://id.bristow.ch'),
         'bundle_ok' => is_file(SEALID_ROOT . '/.well-known/seal-id.json'),
-        'version' => SEALID_VERSION,
+        'version' => up_current(),
+        'update' => up_state(),
     ];
 }
 

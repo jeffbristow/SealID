@@ -28,6 +28,19 @@ try {
             if (!is_installed()) json_out(['ok' => false, 'error' => 'Not set up yet.'], 404, true);
             json_out(Chain::bundle(), 200, true);
 
+        case 'avatar':
+            $av = avatar_current();
+            if (!$av) { http_response_code(404); exit; }
+            header('Content-Type: ' . $av['mime']);
+            header('Content-Length: ' . filesize($av['file']));
+            // The URL carries the hash, so it can be cached for long.
+            header('Cache-Control: public, max-age=' . (isset($_GET['h']) && str_starts_with($av['sha'], (string)$_GET['h']) ? '2592000, immutable' : '300'));
+            header('Access-Control-Allow-Origin: *');
+            header('X-Content-Type-Options: nosniff');
+            header("Content-Security-Policy: default-src 'none'; sandbox");
+            readfile($av['file']);
+            exit;
+
         case 'key':
             $st = Chain::state();
             if (empty($st['key'])) { http_response_code(404); exit; }

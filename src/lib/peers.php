@@ -183,6 +183,7 @@ function peer_verify(string $url, bool $checkProofs = true): array
         'ok' => true,
         'url' => $url,
         'name' => $st['name'],
+        'avatar' => !empty($st['avatar']) ? avatar_fetch_peer($url, $st['avatar']) : null,
         'bio' => $st['bio'],
         'fp' => $st['fp'],
         'fps' => $st['fps'],
@@ -236,6 +237,8 @@ function vouch_import(string $from): array
             $all[] = [
                 'url' => $from, 'seq' => $found['seq'], 'fp' => $r['fp'], 'name' => $r['name'],
                 'ts' => $found['ts'], 'proofs' => $found['proofs'], 'checked' => time(),
+                // Small, hash-checked copy of their picture for the "Verified by" list.
+                'avatar' => is_string($r['avatar'] ?? null) && strlen($r['avatar']) <= 120000 ? $r['avatar'] : null,
             ];
         }
         usort($all, fn($a, $b) => $b['ts'] <=> $a['ts']);

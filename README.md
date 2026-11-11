@@ -65,6 +65,23 @@ Requirements: PHP 8.1+ with the `curl`, `sodium` and `openssl` extensions
 Seal ID keeps its data in a `.sealid-data` folder **next to** the install
 folder (outside the web root). Set `data_dir` in `config.php` to change that.
 
+### Updates
+
+From 1.1.0, Seal ID updates itself with one click: **Admin → Settings → Updates**.
+It checks GitHub for a new release (at most every 12 hours, or when you press
+**Check now**), and installs it only if the package is signed with Seal ID's
+release key — a tampered or unsigned download is refused and nothing changes.
+`config.php`, your data and `.well-known/` are never touched, and the files it
+replaced are kept so **Undo** can put the previous version back.
+(Coming from 1.0.0: upload 1.1.0 by hand once.)
+
+### Profile picture
+
+Add a picture under **Admin → Profile**. It's cropped square and re-drawn on
+your server (no photo metadata survives), and its fingerprint (SHA-256) becomes
+part of your signed profile — so other Seal IDs show it only if it's exactly
+the picture you signed.
+
 ### Supported keys
 
 Ed25519 (GnuPG, OpenPGP.js, Seal Post, Seal Chat — including v6 keys) and RSA
@@ -77,7 +94,16 @@ php tests/run.php              # verifier + chain tests
 node tests/make-fixtures.mjs   # regenerate OpenPGP.js test keys
 node tests/make-chain.mjs      # regenerate the chain fixture
 node tests/e2e.mjs <url> <setup_code>   # end-to-end against a fresh install
+php tests/update-test.php      # updater: signed / tampered / forged packages, undo
 ```
+
+### Releasing
+
+1. Bump `SEALID_VERSION` in `src/lib/bootstrap.php`, commit, tag `v<version>`, push.
+2. `node tools/release.mjs` → `dist/SealID-<version>.zip` + `.zip.sig`
+   (needs the release signing key, which is never in this repository).
+3. Publish a GitHub release for the tag with both files attached. Installs only
+   accept assets named exactly `SealID-<version>.zip` and `SealID-<version>.zip.sig`.
 
 ## License
 

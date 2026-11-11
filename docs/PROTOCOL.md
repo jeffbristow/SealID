@@ -56,8 +56,8 @@ A link's **hash** is `sha256(payload)` in lower-case hex. The chain **head** is
 
 | type      | body | notes |
 |-----------|------|-------|
-| `eldest`  | `{name, bio, reset_from?}` | must be seq 1. `reset_from` = old fingerprint when the owner lost a key and started over |
-| `profile` | `{name, bio}` | replaces display name / bio |
+| `eldest`  | `{name, bio, avatar?, reset_from?}` | must be seq 1. `reset_from` = old fingerprint when the owner lost a key and started over |
+| `profile` | `{name, bio, avatar?}` | replaces display name / bio / picture. `avatar` (1.1.0) = lower-case hex SHA-256 of the picture file; absent = no picture |
 | `proof`   | `{service, handle}` | claims an account. The link's seq is the proof's id |
 | `revoke`  | `{seqs: [n, …]}` | withdraws earlier `proof`, `vouch` or `mirrors` links |
 | `vouch`   | `{target, target_fp, target_seq, target_hash, proofs: [{seq, service, handle, how}]}` | "I checked this other identity". `how` is `auto` (my server verified it) or `witnessed` (I looked at it myself) |
@@ -87,11 +87,14 @@ web host, can be cached by CDNs and can be copied verbatim to mirrors.
   "locators": { "4": "https://x.com/jeff/status/123" },
   "vouched_by": [ {"url": "https://id.example.net", "seq": 7} ],
   "checks": { "4": {"status": "verified", "at": 1762860000} },
+  "avatar": { "url": "api.php?a=avatar&h=…", "sha256": "…", "type": "image/webp" },
   "updated": 1762860000
 }
 ```
 
-Only `chain` (and the keys whose fingerprints it names) is trusted. `locators`
+Only `chain` (and the keys whose fingerprints it names) is trusted. The picture
+at `avatar.url` (relative to the address) is shown only if its SHA-256 equals the
+`avatar` hash in the newest signed profile statement. `locators`
 (where a proof post lives), `vouched_by` (hints of who vouched) and `checks`
 (this server's own last results) are unsigned hints that a verifier always
 re-checks for itself.
@@ -182,6 +185,7 @@ signed vouch link can be checked independently.
 | request | purpose |
 |---------|---------|
 | `GET ?a=bundle` | the bundle (same as the static file), CORS `*` |
+| `GET ?a=avatar` | the profile picture (1.1.0; WebP/PNG/JPEG, ≤ 512 KB, square) |
 | `GET ?a=status` | this server's proof statuses; re-checks a few stale ones |
 | `POST ?a=inbox` `{from, seq}` | vouch notification (rate-limited) |
 | `POST ?a=reach` `{url}` | "can you reach me?" — fetches another installation's bundle and reports what it got. Used by the setup page's reachability test (rate-limited) |

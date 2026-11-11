@@ -88,6 +88,42 @@ r = await post('admin.php?a=locator', { seq, url: 'https://twitter.com/someone/s
 ok('locator saved + checked', r.ok && r.proofs[0].locator === 'https://x.com/SomeOne/status/1234567890', r.error);
 console.log('     x check result:', r.proofs[0].status, '-', r.proofs[0].detail);
 
+// Profile picture (1.1.0)
+const { deflateSync } = await import('node:zlib');
+const { createHash } = await import('node:crypto');
+function png(w, h) {   // tiny RGB PNG encoder: a green/blue gradient
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = b => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (t, d) => { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(t), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); };
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 60; raw[o + 1] = 120 + (x * 100 / w) | 0; raw[o + 2] = 145 + (y * 100 / h) | 0; }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+ok('garbage picture refused', !(await post('admin.php?a=avatar_upload', { image: 'data:image/png;base64,' + Buffer.from('not an image').toString('base64') })).ok);
+r = await post('admin.php?a=avatar_upload', { image: 'data:image/png;base64,' + png(600, 400).toString('base64') });
+ok('picture uploaded + cleaned', r.ok && /^[0-9a-f]{64}$/.test(r.sha) && /^data:image\/(webp|png);base64,/.test(r.data), r.error);
+const avSha = r.sha;
+ok('unknown picture hash refused', !(await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Tester', bio: '', avatar: 'a'.repeat(64) })).ok);
+r = await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Tester', bio: 'Hello', avatar: avSha });
+ok('profile with picture prepared', r.ok && r.payload.includes('"avatar":"' + avSha + '"'), r.error);
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+ok('profile with picture signed', r.ok && r.identity.avatar === avSha && r.identity.avatar_url, r.error);
+let img = await req('api.php?a=avatar&h=' + avSha.slice(0, 16));
+let imgBytes = Buffer.from(await img.arrayBuffer());
+ok('picture served, hash matches signed hash', img.status === 200 && /^image\/(webp|png)$/.test(img.headers.get('content-type')) && createHash('sha256').update(imgBytes).digest('hex') === avSha);
+ok('picture is a square crop', (() => { const t = img.headers.get('content-type'); if (t === 'image/png') return imgBytes.readUInt32BE(16) === imgBytes.readUInt32BE(20); return imgBytes.slice(0, 4).toString() === 'RIFF'; })());
+b = await (await req('api.php?a=bundle')).json();
+ok('bundle names the picture', b.avatar && b.avatar.sha256 === avSha);
+p = await page('index.php');
+ok('profile page shows the picture', p.html.includes('avatar-img') && p.html.includes('api.php?a=avatar&amp;h=' + avSha.slice(0, 16)));
+r = await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Tester', bio: 'Hello', avatar: null });
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+ok('picture removed', r.ok && !r.identity.avatar && (await req('api.php?a=avatar')).status === 404, r.error);
+r = await post('admin.php?a=update_status', {});
+ok('update status answers', r.ok && r.update && r.update.current, r.error);
+console.log('     update check:', r.update.update ? 'update ' + r.update.update.version : 'no update', r.update.error ? '(' + r.update.error + ')' : '');
+
 // Profile + revoke
 r = await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Renamed', bio: '' });
 r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
@@ -117,7 +153,7 @@ r = await post('admin.php?a=login', { password: 'correct horse battery' });
 ok('password login', r.ok, r.error);
 
 b = await (await req('.well-known/seal-id.json')).json();
-ok('final bundle has 5 links', b.chain.length === 5, String(b.chain.length));
+ok('final bundle has 7 links', b.chain.length === 7, String(b.chain.length));
 
 // Leave a few proofs in place for looking at the UI (DEMO=1)
 if (process.env.DEMO) {
@@ -126,6 +162,10 @@ if (process.env.DEMO) {
     r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
     ok('demo proof ' + service, r.ok, r.error);
   }
+  r = await post('admin.php?a=avatar_upload', { image: 'data:image/png;base64,' + png(500, 500).toString('base64') });
+  r = await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Renamed', bio: 'Demo identity', avatar: r.sha });
+  r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+  ok('demo picture', r.ok, r.error);
   console.log('COOKIE ' + cookie);
 }
 console.log(fails ? `\n${fails} FAILED` : '\nall e2e checks passed');
