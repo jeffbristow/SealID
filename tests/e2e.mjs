@@ -74,7 +74,7 @@ r = await post('admin.php?a=login', { sig: await sign(r.payload) });
 ok('login with key', r.ok, r.error);
 if (r.csrf) csrf = r.csrf;
 r = await post('admin.php?a=state', {});
-ok('state', r.ok && r.identity.name === 'E2E Tester' && r.services.length === 10, r.error);
+ok('state', r.ok && r.identity.name === 'E2E Tester' && r.services.length === 11, r.error);
 
 // Add a proof (x needs a locator)
 r = await post('admin.php?a=prepare', { type: 'proof', service: 'x', handle: '@SomeOne' });
@@ -139,6 +139,62 @@ ok('set password', r.ok && r.has_password);
 r = await post('admin.php?a=update_key', { key: publicKey });
 ok('update key (same fp)', r.ok, r.error);
 
+// ---- 1.2.0: Seal Chat proofs ----
+const myFp = priv.getFingerprint().toUpperCase();
+const onion = 'a'.repeat(55) + 'd';
+r = await post('admin.php?a=prepare', { type: 'proof', service: 'sealchat', handle: `sealchat:${onion}:${myFp.toLowerCase()}` });
+ok('sealchat handle normalised', r.ok && r.payload.includes(`"handle":"sealchat:${onion}:${myFp}"`), r.error);
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+let scp = r.proofs.find(p => p.service === 'sealchat');
+ok('sealchat proof with the SAME key verifies by itself', scp && scp.status === 'verified', scp && scp.detail);
+// a separate Seal Chat key
+const sc = await openpgp.generateKey({ userIDs: [{ name: 'Seal Chat' }], format: 'armored' });
+const scPriv = await openpgp.readPrivateKey({ armoredKey: sc.privateKey });
+const scFp = scPriv.getFingerprint().toUpperCase();
+const scHandle = `sealchat:${'b'.repeat(55)}d:${scFp}`;
+r = await post('admin.php?a=prepare', { type: 'proof', service: 'sealchat', handle: scHandle });
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+scp = r.proofs.find(p => p.handle === scHandle);
+ok('sealchat proof with another key waits for its signature', scp && scp.status === 'pending', scp && scp.status);
+const scText = 'Verifying my Seal ID ' + ID_URL + ' ' + scp.token;
+const scSign = async (k, t) => openpgp.sign({ message: await openpgp.createMessage({ binary: new TextEncoder().encode(t) }), signingKeys: k, detached: true });
+r = await post('api.php?a=attest', { sealchat: scHandle, key: sc.publicKey, sig: await scSign(scPriv, scText + ' x') });
+ok('attestation over the wrong text refused', !r.ok && r.status === 422, r.error);
+r = await post('api.php?a=attest', { sealchat: scHandle, key: publicKey, sig: await scSign(priv, scText) });
+ok('attestation by a key other than the Seal Chat key refused', !r.ok, r.error);
+r = await post('api.php?a=attest', { sealchat: `sealchat:${'c'.repeat(55)}d:${scFp}`, key: sc.publicKey, sig: await scSign(scPriv, scText) });
+ok('attestation for an unclaimed Seal Chat ID refused', !r.ok && r.status === 404, r.error);
+r = await post('api.php?a=attest', { sealchat: scHandle, key: sc.publicKey, sig: await scSign(scPriv, scText) });
+ok('Seal Chat attestation accepted', r.ok, r.error);
+r = await post('admin.php?a=state', {});
+scp = r.proofs.find(p => p.handle === scHandle);
+ok('sealchat proof with another key now verified', scp && scp.status === 'verified', scp && scp.detail);
+b = await (await req('api.php?a=bundle')).json();
+ok('bundle carries the attestation', b.attestations && b.attestations[String(scp.seq)] && b.attestations[String(scp.seq)].key.includes('PUBLIC KEY'));
+
+// ---- 1.2.0: badge lookup ----
+let cl = await (await req('api.php?a=claim&service=sealchat&handle=' + encodeURIComponent(scHandle))).json();
+ok('claim: Seal Chat ID verified', cl.ok && cl.verified === true && cl.fp === myFp && cl.url === ID_URL, JSON.stringify(cl));
+cl = await (await req('api.php?a=claim&domain=nowhere.example')).json();
+ok('claim: unknown domain not verified', cl.ok && cl.verified === false && cl.status === 'none');
+
+// ---- 1.2.0: encrypted key copy on the server (option B) ----
+const { serverCopy } = await import(pathToFileURL(resolve(here, '../src/assets/keystore.js')).href);
+ok('server copy needs 12+ char passphrase', await serverCopy.make(ID_URL, myFp, privateKey, 'short').then(() => false, () => true));
+const blob = await serverCopy.make(ID_URL, myFp, privateKey, 'a long test passphrase');
+ok('server copy refuses junk', !(await post('admin.php?a=keystore_put', { blob: { v: 1, fp: myFp } })).ok);
+ok('server copy refuses weak KDF', !(await post('admin.php?a=keystore_put', { blob: { ...blob, iter: 1000 } })).ok);
+r = await post('admin.php?a=keystore_put', { blob });
+ok('server copy stored', r.ok && r.keystore, r.error);
+r = await post('admin.php?a=keystore_get', {});
+ok('server copy unlocks with the passphrase', (await serverCopy.open(ID_URL, r.blob, 'a long test passphrase')) === privateKey);
+ok('server copy refuses a wrong passphrase', await serverCopy.open(ID_URL, r.blob, 'wrong passphrase!!').then(() => false, () => true));
+ok('server copy bound to this Seal ID', await serverCopy.open('https://other.example', r.blob, 'a long test passphrase').then(() => false, () => true));
+const raw = await (await req('.well-known/seal-id.json')).text();
+ok('server copy NOT in the public bundle', !raw.includes(blob.ct.slice(0, 40)));
+r = await post('admin.php?a=keystore_delete', {});
+ok('server copy deleted', r.ok && !r.keystore);
+
 // Public API
 r = await (await req('api.php?a=status')).json();
 ok('status api', r.ok && Array.isArray(r.proofs));
@@ -153,7 +209,7 @@ r = await post('admin.php?a=login', { password: 'correct horse battery' });
 ok('password login', r.ok, r.error);
 
 b = await (await req('.well-known/seal-id.json')).json();
-ok('final bundle has 7 links', b.chain.length === 7, String(b.chain.length));
+ok('final bundle has 9 links', b.chain.length === 9, String(b.chain.length));
 
 // Leave a few proofs in place for looking at the UI (DEMO=1)
 if (process.env.DEMO) {

@@ -113,7 +113,11 @@ reported as **"host blocked automated checking"**, never as "invalid".
 
 **DNS pin (optional, recommended):** a TXT record at `_seal-id.<host>`:
 
-    v=sealid1; fp=<FINGERPRINT>; mirror=<https url>; mirror=<https url>
+    v=sealid1; id=<identity address>; fp=<FINGERPRINT>; mirror=<https url>; …
+
+A record applies to the identity named by `id=`; a record without `id=` applies
+only to the identity at the host's root (`https://host`). Several records can
+sit side by side for several identities on one host (1.2.0).
 
 DNS is not filtered by web security systems, so a verifier always learns which
 key to expect. A bundle (from anywhere) whose eldest/current key does not match

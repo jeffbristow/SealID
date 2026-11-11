@@ -59,16 +59,23 @@ function peer_dns(string $url): ?array
     if (!$host) return null;
     $txt = dns_txt('_seal-id.' . $host);
     if (!$txt) return null;
+    // A host can carry several Seal IDs (e.g. https://example.com and https://example.com/team).
+    // A record applies to the identity it names with "id=", or — without "id=" — only to the
+    // identity at the host's root (1.2.0; before, any identity on the host was compared).
+    $root = (string)parse_url($url, PHP_URL_PATH) === '';
+    $fallback = null;
     foreach ($txt as $t) {
         if (!preg_match('/^\s*v=sealid1\b/i', $t)) continue;
-        $out = ['fp' => null, 'mirrors' => [], 'raw' => $t];
+        $out = ['fp' => null, 'mirrors' => [], 'raw' => $t, 'id' => null];
         foreach (preg_split('/\s*;\s*/', $t) as $part) {
             if (preg_match('/^fp=([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$/', $part, $m)) $out['fp'] = strtoupper($m[1]);
             if (preg_match('#^mirror=(https://\S+)$#', $part, $m)) $out['mirrors'][] = $m[1];
+            if (preg_match('#^id=(https://\S+)$#', $part, $m)) $out['id'] = Chain::normUrl($m[1]);
         }
-        return $out;
+        if ($out['id'] === $url) return $out;
+        if ($out['id'] === null && $root && $fallback === null) $fallback = $out;
     }
-    return null;
+    return $fallback;
 }
 
 /**
@@ -169,7 +176,8 @@ function peer_verify(string $url, bool $checkProofs = true): array
         $loc = $b['locators'][(string)$seq] ?? $b['locators'][$seq] ?? null;
         $cls = proof_service($p['service']);
         if (!is_string($loc) || !$cls || ($cls::LOCATOR && $cls::locatorOk($p['handle'], $loc) === null)) $loc = null;
-        $res = $checkProofs ? proof_check($p, $loc) : ['status' => 'pending', 'detail' => 'Not checked.'];
+        $ctx = ['fps' => $st['fps'], 'url' => $url, 'attestation' => is_array($b['attestations'][(string)$seq] ?? null) ? $b['attestations'][(string)$seq] : null];
+        $res = $checkProofs ? proof_check($p, $loc, $ctx) : ['status' => 'pending', 'detail' => 'Not checked.'];
         $proofs[] = $p + [
             'label' => $cls ? $cls::LABEL : $p['service'],
             'profile' => $cls ? $cls::profileUrl($p['handle']) : null,
@@ -297,4 +305,56 @@ function vouch_notify(string $target, int $seq): array
         jwrite('outbox.json', $o);
     });
     return $res;
+}
+
+/* ---------------------------------------------------------------------
+ * Aliases (1.2.0): a domain with a verified website/DNS proof can stand
+ * for the Seal ID it proves. jeffbristow.com → https://id.bristow.ch
+ * --------------------------------------------------------------------- */
+
+/** Seal IDs a domain points to: [[url, token|null, how], …] from its proof file and DNS record. */
+function peer_alias_targets(string $host): array
+{
+    $out = [];
+    $r = http_fetch("https://$host/.well-known/seal-id.txt?sealid=" . time(), ['accept' => 'text/plain', 'max_bytes' => 65536, 'headers' => ['Cache-Control: no-cache']]);
+    if ($r['status'] === 200 && preg_match_all('#Verifying my Seal ID (https://[^\s]+) (sid1:[A-Za-z0-9_-]{22})#', $r['body'], $m, PREG_SET_ORDER)) {
+        foreach ($m as $x) if ($u = Chain::normUrl($x[1])) $out[] = [$u, $x[2], 'web'];
+    }
+    foreach (dns_txt("_seal-id.$host") ?? [] as $t) {
+        if (preg_match('#\bid=(https://[^\s;]+)#', $t, $mm) && ($u = Chain::normUrl($mm[1]))) {
+            $out[] = [$u, preg_match('/sid1:[A-Za-z0-9_-]{22}/', $t, $tk) ? $tk[0] : null, 'dns'];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Look up whatever the user typed: a Seal ID address, or a domain that is a
+ * verified alias of one. The alias only counts if the Seal ID it points to
+ * has a VERIFIED website or DNS proof for that same domain.
+ */
+function peer_lookup(string $input, bool $checkProofs = true): array
+{
+    $url = Chain::normUrl($input);
+    if ($url === null) return ['ok' => false, 'url' => $input, 'error' => 'That is not a valid address.', 'attempts' => [], 'blocked' => false, 'warnings' => [], 'dns' => null];
+    $r = peer_verify($url, $checkProofs);
+    if ($r['ok'] || isset($r['source'])) return $r;          // a Seal ID (valid or not) answered here
+    $host = (string)parse_url($url, PHP_URL_HOST);
+    if (parse_url($url, PHP_URL_PATH)) return $r;            // aliases are bare domains
+    $tried = [];
+    foreach (peer_alias_targets($host) as [$target, $token, $how]) {
+        if (isset($tried[$target]) || $target === $url) continue;
+        $tried[$target] = true;
+        $t = peer_verify($target, true);
+        if (!$t['ok']) continue;
+        foreach ($t['proofs'] as $p) {
+            if (in_array($p['service'], ['web', 'dns'], true) && $p['handle'] === $host && $p['status'] === 'verified' && ($token === null || $token === $p['token'])) {
+                $t['alias'] = $host;
+                array_unshift($t['warnings'], "$host is a verified alias of this Seal ID.");
+                return $t;
+            }
+        }
+    }
+    if ($tried) $r['error'] = "$host points to a Seal ID, but that Seal ID has no verified proof for $host — so it is not a valid alias.";
+    return $r;
 }

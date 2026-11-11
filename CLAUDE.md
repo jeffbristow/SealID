@@ -28,6 +28,8 @@ green design (`src/assets/site.css`), logo `src/assets/seal-id.svg`.
 | `src/lib/view.php` | shared HTML (head, header, footer) |
 | `src/lib/avatar.php` | profile picture: GD re-draw, pending → signed, serving, peer fetch (1.1.0) |
 | `src/lib/update.php` | one-click updates from signed GitHub release packages, undo (1.1.0) |
+| `src/lib/proofs/sealchat.php` | Seal Chat proofs: same key, or attestation signed by the Seal Chat key (1.2.0) |
+| `src/assets/keystore.js` | optional saved key: on this device (passkey PRF / passphrase) or encrypted server copy (1.2.0) |
 | `tools/release.mjs` | builds + signs `dist/SealID-<v>.zip(.sig)` from the tag |
 | `src/assets/` | css, logo, admin.js, sign.js, bundled OpenPGP.js 6.3.2 (LGPL) |
 | `tests/` | CLI tests: `php tests/run.php` (fixtures made by `node tests/make-fixtures.mjs`) |
@@ -66,6 +68,16 @@ https addresses: proofs, vouching, inbox, withdrawal, mirror fallback).
   must not be a draft/prerelease (installs read /releases/latest). Notes: bullets under
   "## New in Seal ID x.y.z" (the admin page shows the first bullets).
 - Changing the signing key means every install must be updated by hand once.
+
+## 1.2.0 rules
+
+- Aliases: a domain is an alias only if the Seal ID it points to has a VERIFIED web/dns proof for it
+  (`peer_lookup`). DNS proofs need `id=<url>` in the record to be alias-ready (checks store `alias`).
+- DNS key records (`v=sealid1`) apply to the identity named by `id=`, or without it only to the
+  identity at the host root — several identities can share a host.
+- Saved keys: the server only ever stores ciphertext made in the browser (keystore.js); never add a
+  path where the server can sign by itself.
+- `Element.append()` prints null as "null": pass '' (el() filters nulls, append does not).
 
 ## Hosting lessons
 

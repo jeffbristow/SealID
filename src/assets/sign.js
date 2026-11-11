@@ -13,6 +13,8 @@ export const signer = {
   loaded: () => key !== null,
   fp: () => (key ? key.getFingerprint().toUpperCase() : null),
   publicArmored: () => (key ? key.toPublic().armor() : null),
+  /** The unlocked key, armored WITHOUT a passphrase — only for encrypting it again (keystore.js). */
+  secretArmored: () => (key ? key.armor() : null),
   onChange(fn) { listeners.add(fn); },
   forget() { key = null; listeners.forEach(f => f()); },
   async load(text, passphrase) {
@@ -132,6 +134,37 @@ export function keyForm({ expectFp, onLoaded, compact = false }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Saved keys (1.2.0): admin.js registers a provider that returns
+ *   [{ label, needsPassphrase, unlock(passphrase) → armored secret key }]
+ * ------------------------------------------------------------------ */
+let savedKeys = async () => [];
+export function setSavedKeyProvider(fn) { savedKeys = fn; }
+
+/** Buttons to unlock a saved key; calls onLoaded(fp) when the key is in memory. */
+export async function savedKeyButtons({ expectFp, onLoaded, onError }) {
+  const list = await savedKeys().catch(() => []);
+  if (!list.length) return null;
+  const box = el('div', { class: 'stack' });
+  for (const s of list) {
+    const pass = s.needsPassphrase ? el('input', { type: 'password', placeholder: 'Passphrase for ' + s.short, autocomplete: 'off' }) : null;
+    const b = el('button', { class: 'btn primary', type: 'button' }, s.label);
+    const go = async () => {
+      b.disabled = true;
+      try {
+        const armored = await s.unlock(pass ? pass.value : '');
+        const fp = await signer.load(armored, '');
+        if (expectFp && fp !== expectFp) { signer.forget(); throw new Error('The saved key is not this Seal ID’s key.'); }
+        onLoaded && onLoaded(fp);
+      } catch (e) { b.disabled = false; onError ? onError(e) : toast(e.message, true); }
+    };
+    b.addEventListener('click', go);
+    if (pass) pass.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    box.append(pass ? el('div', { class: 'row wrapline' }, el('div', { class: 'grow' }, pass), b) : b);
+  }
+  return box;
+}
+
+/* ------------------------------------------------------------------ *
  * The sign dialog: returns a Promise of the armored signature (or null)
  * ------------------------------------------------------------------ */
 export function signDialog({ title, explain, payload, expectFp }) {
@@ -173,6 +206,11 @@ export function signDialog({ title, explain, payload, expectFp }) {
         el('button', { type: 'button', 'aria-pressed': mode === 'paste' ? 'true' : 'false', onclick: () => render('paste') }, 'Paste a signature'));
       body.append(seg);
       if (mode !== 'paste') {
+        const saved = el('div');
+        body.append(saved, sigErr);
+        savedKeyButtons({ expectFp, onLoaded: () => render('key'), onError: e => fail(e.message) }).then(btns => {
+          if (btns) saved.append(el('div', { class: 'small muted' }, 'Your saved key:'), btns, el('div', { class: 'small muted mt' }, '…or load the key file:'));
+        });
         body.append(keyForm({ expectFp, onLoaded: () => render('key') }));
       } else {
         const ta = el('textarea', { placeholder: '-----BEGIN PGP SIGNATURE-----', spellcheck: 'false' });

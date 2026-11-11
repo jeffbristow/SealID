@@ -345,6 +345,10 @@ final class Chain
             'locators' => (object)$locators,
             'vouched_by' => $vb,
             'checks' => (object)$checks,
+            // 1.2.0: Seal Chat signatures for sealchat proofs (self-verifying), and the
+            // domains this identity answers to (unsigned hint: each is a proof anyone can re-check).
+            'attestations' => (object)array_filter(jread('attestations.json', []), fn($k) => isset($st['proofs'][(int)$k]), ARRAY_FILTER_USE_KEY),
+            'aliases' => function_exists('own_aliases') ? own_aliases() : [],
             // 1.1.0: where to fetch the profile picture; its hash is signed in the chain.
             'avatar' => ($av = avatar_current()) ? ['url' => 'api.php?a=avatar&h=' . substr($av['sha'], 0, 16), 'sha256' => $av['sha'], 'type' => $av['mime']] : null,
             'software' => 'SealID/' . SEALID_VERSION,

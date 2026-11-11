@@ -1,11 +1,29 @@
 // Seal ID — admin page.
-import { signer, el, toast, copyBox, keyForm, signDialog, fpGroups } from './sign.js';
+import { signer, el, toast, copyBox, keyForm, signDialog, fpGroups, setSavedKeyProvider, savedKeyButtons } from './sign.js';
+import { deviceKey, serverCopy, passkeySupported } from './keystore.js';
 
 const D = JSON.parse(document.getElementById('sealid-data').textContent);
 const app = document.getElementById('app');
 let S = null;              // last admin state from the server
 let tab = 'proofs';
 let peerReport = null;     // last "check another Seal ID" report
+
+/* Saved signing key (1.2.0, optional): offered wherever the key is needed. */
+const KID = () => D.url + '|' + D.fp;
+setSavedKeyProvider(async () => {
+  const out = [];
+  const st = await deviceKey.status(KID());
+  if (st) out.push({
+    short: 'this device', needsPassphrase: st.method !== 'passkey',
+    label: st.method === 'passkey' ? 'Unlock with my passkey' : 'Unlock the key saved on this device',
+    unlock: p => deviceKey.unlock(KID(), p),
+  });
+  if (D.admin && S && S.keystore) out.push({
+    short: 'the server copy', needsPassphrase: true, label: 'Unlock the copy on my Seal ID server',
+    unlock: async p => { const r = await api('keystore_get'); if (!r.blob) throw new Error('There is no server copy.'); return serverCopy.open(D.url, r.blob, p); },
+  });
+  return out;
+});
 
 /* ------------------------------------------------------------------ */
 async function api(action, body) {
@@ -49,11 +67,11 @@ function ago(ts) {
 
 const LABELS = { verified: 'Verified', failed: 'Failed', unreachable: 'Not reachable right now', pending: 'Pending', witnessed: 'Witnessed', unsupported: 'Not supported here' };
 const badge = (s, title) => el('span', { class: 'badge s-' + s, title: title || '' }, LABELS[s] || s);
-const LETTERS = { web: 'W', dns: 'D', github: 'GH', x: 'X', mastodon: 'M', bluesky: 'B', hackernews: 'Y', reddit: 'R', youtube: 'YT', facebook: 'F' };
+const LETTERS = { web: 'W', dns: 'D', github: 'GH', x: 'X', mastodon: 'M', bluesky: 'B', hackernews: 'Y', reddit: 'R', youtube: 'YT', facebook: 'F', sealchat: 'SC' };
 const avatarEl = (src, name, cls = 'avatar') => src
   ? el('img', { class: cls + ' avatar-img', src, alt: '' })
   : el('div', { class: cls, 'aria-hidden': 'true' }, (name || '?').slice(0, 1).toUpperCase());
-const svc = id =>el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
+const svc = id => el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
 
 /* ------------------------------------------------------------------ *
  * Sign-in
@@ -61,6 +79,7 @@ const svc = id =>el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] 
 function renderLogin() {
   const err = el('div', { class: 'notice bad hidden' });
   const fail = e => { err.textContent = e.message; err.classList.remove('hidden'); };
+  const savedBox = el('div', { class: 'stack' });
   const keyBtn = el('button', { class: 'btn primary', type: 'button' }, 'Sign in with my key');
   keyBtn.addEventListener('click', () => busy(keyBtn, async () => {
     err.classList.add('hidden');
@@ -87,7 +106,15 @@ function renderLogin() {
     el('img', { src: 'assets/seal-id.svg', alt: '', width: 80, height: 80 }),
     el('h1', {}, 'Sign in'),
     el('p', { class: 'muted' }, 'Owner of ', el('span', { class: 'mono' }, D.url)),
-    err, keyBtn, pwBox));
+    savedBox, err, keyBtn, pwBox));
+  // 1.2.0: a key saved on this device signs the sign-in challenge in one step.
+  savedKeyButtons({ expectFp: D.fp, onError: fail, onLoaded: async () => {
+    try {
+      const c = await api('challenge');
+      const r = await api('login', { sig: await signer.sign(c.payload) });
+      D.csrf = r.csrf || D.csrf; D.admin = true; await load();
+    } catch (e) { fail(e); }
+  } }).then(b => { if (b) savedBox.append(b, el('div', { class: 'small muted' }, 'or')); });
 }
 
 /* ------------------------------------------------------------------ *
@@ -124,10 +151,14 @@ function keyBar() {
 function unlockModal() {
   const modal = el('div', { class: 'modal' });
   const close = () => modal.remove();
+  const done = () => { close(); toast('Key unlocked for this tab.'); };
+  const saved = el('div', { class: 'stack' });
   modal.append(el('div', { class: 'box' },
     el('div', { class: 'row between' }, el('h2', { class: 'mb0' }, 'Unlock your key'), el('button', { class: 'btn small ghost', type: 'button', onclick: close }, 'Close')),
-    keyForm({ expectFp: S.identity.fp, onLoaded: () => { close(); toast('Key unlocked for this tab.'); } })));
+    saved,
+    keyForm({ expectFp: S.identity.fp, onLoaded: done })));
   document.body.append(modal);
+  savedKeyButtons({ expectFp: S.identity.fp, onLoaded: done }).then(b => { if (b) saved.append(b, el('div', { class: 'small muted mt' }, '…or load the key file:')); });
 }
 
 function render() {
@@ -295,7 +326,7 @@ function drawReport(out, r) {
   out.append(box);
   if (!r.ok) {
     box.append(el('div', { class: 'notice bad' }, r.error),
-      r.attempts && r.attempts.length ? el('ul', { class: 'small muted' }, r.attempts.map(a => el('li', {}, a.source + ' — ' + a.result))) : null);
+      r.attempts && r.attempts.length ? el('ul', { class: 'small muted' }, r.attempts.map(a => el('li', {}, a.source + ' — ' + a.result))) : '');
     return;
   }
   if (r.pin === 'changed') {
@@ -424,7 +455,7 @@ function updatesCard() {
   box.append(el('p', { class: 'small muted' },
     'This is Seal ID ' + U.current + '. ',
     U.checked ? 'Last checked ' + ago(U.checked) + (U.latest ? ' — newest release: ' + U.latest + '.' : '.') : 'Not checked yet.'),
-    U.error && !U.latest ? el('div', { class: 'notice warn' }, 'Couldn’t check GitHub: ' + U.error) : null);
+    U.error && !U.latest ? el('div', { class: 'notice warn' }, 'Couldn’t check GitHub: ' + U.error) : '');
   if (U.update) {
     const go = el('button', { class: 'btn primary', type: 'button' }, 'Update to ' + U.update.version);
     go.addEventListener('click', () => busy(go, async () => {
@@ -449,9 +480,80 @@ function updatesCard() {
   return box;
 }
 
+/** 1.2.0: optional saved signing key — on this device (A) and/or encrypted on this server (B). */
+function keyStorageCard() {
+  const box = el('div', { class: 'card stack', id: 'keystorage' }, el('h2', {}, 'Saved signing key (optional)'),
+    el('p', { class: 'small muted' }, 'Normally you load your key file — or paste a signature from gpg or Seal Post — whenever something needs signing, and that keeps working. ' +
+      'If you prefer, save the key encrypted so signing is a single tap. Your key is encrypted in this browser before it is stored anywhere; this server never sees it unencrypted.'));
+  const dev = el('div', { class: 'stack' });
+  const srv = el('div', { class: 'stack' });
+  box.append(el('h3', { class: 'mt' }, 'On this device'), dev, el('h3', { class: 'mt' }, 'Encrypted copy on this server (for your other devices)'), srv);
+  const needKey = () => {
+    if (signer.loaded()) return true;
+    unlockModal();
+    toast('Unlock your key first (this once), then choose again.');
+    return false;
+  };
+  const host = new URL(D.url).host;
+  (async () => {
+    const st = await deviceKey.status(KID());
+    if (st) {
+      const rm = el('button', { class: 'btn small danger', type: 'button' }, 'Remove from this device');
+      rm.addEventListener('click', () => busy(rm, async () => { await deviceKey.remove(KID()); toast('Removed from this device.'); render(); }));
+      dev.append(el('div', { class: 'notice ok' }, 'Saved on this device, unlocked with ' + (st.method === 'passkey' ? 'a passkey' : 'a passphrase') + ' (since ' + new Date(st.created).toLocaleDateString() + ').'), el('div', {}, rm));
+    } else {
+      const pk = await passkeySupported();
+      const pass = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Passphrase (8+ characters)' });
+      const withPk = el('button', { class: 'btn primary', type: 'button' }, 'Save with a passkey');
+      withPk.addEventListener('click', () => busy(withPk, async () => {
+        if (!needKey()) return;
+        await deviceKey.save(KID(), signer.secretArmored(), { method: 'passkey', label: 'Seal ID · ' + host });
+        toast('Saved. Next time, one tap unlocks it.');
+        render();
+      }));
+      const withPass = el('button', { class: 'btn', type: 'button' }, 'Save with a passphrase');
+      withPass.addEventListener('click', () => busy(withPass, async () => {
+        if (!needKey()) return;
+        await deviceKey.save(KID(), signer.secretArmored(), { method: 'passphrase', passphrase: pass.value });
+        pass.value = '';
+        toast('Saved on this device.');
+        render();
+      }));
+      dev.append(
+        el('p', { class: 'small muted' }, 'Kept only in this browser, encrypted. A passkey (Windows Hello, Touch ID, your phone) unlocks it with nothing to type; otherwise use a passphrase. Clearing this browser’s site data removes it.'),
+        pk ? el('div', { class: 'row wrapline' }, withPk, el('span', { class: 'tiny muted' }, 'Needs a browser and passkey that support WebAuthn PRF.')) : '',
+        el('div', { class: 'row wrapline' }, el('div', { class: 'grow' }, pass), withPass));
+    }
+
+    if (S.keystore) {
+      const rm = el('button', { class: 'btn small danger', type: 'button' }, 'Delete the server copy');
+      rm.addEventListener('click', () => busy(rm, async () => { await api('keystore_delete'); toast('Deleted.'); render(); }));
+      srv.append(el('div', { class: 'notice ok' }, 'An encrypted copy is stored here (since ' + new Date(S.keystore.created * 1000).toLocaleDateString() + '). On another device: sign in with your fallback password, then unlock it with its passphrase.'), el('div', {}, rm));
+    } else {
+      const p1 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Passphrase (12+ characters)' });
+      const p2 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Same passphrase again' });
+      const up = el('button', { class: 'btn', type: 'button' }, 'Encrypt and store on this server');
+      up.addEventListener('click', () => busy(up, async () => {
+        if (p1.value !== p2.value) throw new Error('The passphrases are different.');
+        if (!needKey()) return;
+        const blob = await serverCopy.make(D.url, S.identity.fp, signer.secretArmored(), p1.value);
+        await api('keystore_put', { blob });
+        p1.value = p2.value = '';
+        toast('Stored (encrypted).');
+        render();
+      }));
+      srv.append(
+        el('p', { class: 'small muted' }, 'Use your key from any device. It is encrypted here with your passphrase before upload. The risk: if your hosting were ever broken into, someone could try to guess the passphrase, or change this page to capture it — so use a long, unique passphrase.'),
+        S.has_password ? '' : el('div', { class: 'notice warn' }, 'Needs a fallback password (below): on a new device you sign in with it first.'),
+        el('div', { class: 'grid2' }, p1, p2), el('div', {}, up));
+    }
+  })().catch(e => dev.append(el('div', { class: 'notice bad' }, e.message)));
+  return box;
+}
+
 function renderSettings(root) {
   const I = S.identity;
-  root.append(updatesCard());
+  root.append(updatesCard(), keyStorageCard());
 
   // Reachability
   const reachOut = el('div');

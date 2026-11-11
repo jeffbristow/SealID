@@ -70,6 +70,6 @@ function service_letter(string $service): string
 {
     return [
         'web' => 'W', 'dns' => 'D', 'github' => 'GH', 'x' => 'X', 'mastodon' => 'M', 'bluesky' => 'B',
-        'hackernews' => 'Y', 'reddit' => 'R', 'youtube' => 'YT', 'facebook' => 'F',
+        'hackernews' => 'Y', 'reddit' => 'R', 'youtube' => 'YT', 'facebook' => 'F', 'sealchat' => 'SC',
     ][$service] ?? strtoupper(substr($service, 0, 1));
 }

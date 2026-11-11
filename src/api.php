@@ -73,6 +73,63 @@ try {
             $r = vouch_import($from);
             json_out(['ok' => $r['ok'], 'error' => $r['error'] ?? null], $r['ok'] ? 200 : 422);
 
+        case 'claim':
+            // 1.2.0 badge lookup: "does this Seal ID have a working proof for this domain/account?"
+            //   GET ?a=claim&domain=jeff.bristow.ch   or   ?a=claim&service=github&handle=octocat
+            if (!is_installed()) fail(404, 'Not set up yet.');
+            if (!rate_limit('claim', 60, 60)) fail(429, 'Too many lookups.');
+            $st = Chain::state();
+            $domain = strtolower(trim((string)($_GET['domain'] ?? '')));
+            $svc = (string)($_GET['service'] ?? '');
+            $handle = (string)($_GET['handle'] ?? '');
+            $match = null;
+            foreach (own_proofs() as $p) {
+                $hit = $domain !== ''
+                    ? in_array($p['service'], ['web', 'dns'], true) && $p['handle'] === $domain
+                    : $p['service'] === $svc && strcasecmp($p['handle'], $handle) === 0;
+                if ($hit && ($match === null || $p['status'] === 'verified')) $match = $p;
+            }
+            $base = $st['url'];
+            header('Cache-Control: public, max-age=300');
+            json_out([
+                'ok' => true,
+                'verified' => $match !== null && in_array($match['status'], ['verified', 'witnessed'], true),
+                'status' => $match['status'] ?? 'none',
+                'service' => $match['service'] ?? ($domain !== '' ? 'web' : $svc),
+                'handle' => $match['handle'] ?? ($domain !== '' ? $domain : $handle),
+                'checked' => $match['checked'] ?? 0,
+                'url' => $base,
+                'profile' => $base . '/',
+                'name' => $st['name'],
+                'fp' => $st['fp'],
+                'avatar' => ($a = avatar_url()) ? $base . '/' . $a : null,
+            ], 200, true);
+
+        case 'attest':
+            // 1.2.0: Seal Chat delivers its signature for a sealchat proof. Self-verifying, so anyone may post it.
+            //   POST {"sealchat": "sealchat:<onion>:<fp>", "key": armored public key, "sig": detached signature}
+            if ($method !== 'POST') fail(405, 'POST only.');
+            if (!is_installed()) fail(404, 'Not set up yet.');
+            if (!rate_limit('attest', 20, 3600)) fail(429, 'Too many attempts.');
+            $b = body_json();
+            $st = Chain::state();
+            proof_services();                       // loads the proof classes
+            $want = Proof_sealchat::normalize((string)($b['sealchat'] ?? ''));
+            $seq = null;
+            foreach ($st['proofs'] as $s => $p) if ($p['service'] === 'sealchat' && $p['handle'] === $want) $seq = $s;
+            if ($seq === null) fail(404, 'This Seal ID has no proof for that Seal Chat ID. Add it in the Seal ID admin first.');
+            $att = ['key' => (string)($b['key'] ?? ''), 'sig' => (string)($b['sig'] ?? '')];
+            [$ok, $why] = Proof_sealchat::checkAttestation($want, Chain::proofText($st['url'], $st['proofs'][$seq]['token']), $att);
+            if (!$ok) fail(422, $why);
+            with_lock(function () use ($seq, $att) {
+                $all = jread('attestations.json', []);
+                $all[(string)$seq] = $att + ['at' => time()];
+                jwrite('attestations.json', $all);
+            });
+            own_recheck(1, true, $seq);
+            Chain::writeBundle();
+            json_out(['ok' => true, 'url' => $st['url'], 'seq' => $seq], 200, true);
+
         case 'reach':
             if ($method !== 'POST') fail(405, 'POST only.');
             if (!rate_limit('reach', 10, 3600)) fail(429, 'Too many tests. Try again later.');

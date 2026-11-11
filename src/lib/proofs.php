@@ -73,7 +73,7 @@ function proof_services(): array
     static $list = null;
     if ($list !== null) return $list;
     $list = [];
-    foreach (['web', 'dns', 'github', 'x', 'mastodon', 'bluesky', 'hackernews', 'reddit', 'youtube', 'facebook'] as $id) {
+    foreach (['web', 'dns', 'github', 'x', 'mastodon', 'bluesky', 'hackernews', 'reddit', 'youtube', 'facebook', 'sealchat'] as $id) {
         $f = __DIR__ . "/proofs/$id.php";
         if (!is_file($f)) continue;
         require_once $f;
@@ -92,7 +92,7 @@ function proof_service(string $id): ?string
 /**
  * Check one proof of identity $url. $proof = ['service','handle','token'].
  */
-function proof_check(array $proof, ?string $locator): array
+function proof_check(array $proof, ?string $locator, array $ctx = []): array
 {
     $cls = proof_service($proof['service']);
     if ($cls === null) return ['status' => 'unsupported', 'detail' => 'This Seal ID version cannot check "' . $proof['service'] . '" proofs.'];
@@ -102,7 +102,7 @@ function proof_check(array $proof, ?string $locator): array
         return ['status' => 'failed', 'detail' => 'The proof address does not belong to ' . $proof['handle'] . '.'];
     }
     try {
-        return $cls::check($proof['handle'], $locator, $proof['token']);
+        return $cls::check($proof['handle'], $locator, $proof['token'], $ctx);
     } catch (Throwable $e) {
         return ['status' => 'unreachable', 'detail' => 'Check failed: ' . $e->getMessage()];
     }
@@ -147,6 +147,7 @@ function own_proofs(): array
             'status' => $status,
             'detail' => $c['detail'] ?? ($cls && !$cls::AUTO ? 'Waiting for other Seal ID owners to witness it.' : 'Not checked yet.'),
             'checked' => $c['at'] ?? 0,
+            'alias' => $p['service'] === 'web' || !empty($c['alias']),
             'witnesses' => $w,
             'vouchers' => array_values(array_unique($wit[$seq]['all'] ?? [])),
         ];
@@ -182,14 +183,14 @@ function own_recheck(int $max = 3, bool $force = false, ?int $onlySeq = null): i
         arsort($todo);
         $n = 0;
         foreach (array_slice(array_keys($todo), 0, $max) as $seq) {
-            $r = proof_check($st['proofs'][$seq], $loc[$seq] ?? null);
+            $r = proof_check($st['proofs'][$seq], $loc[$seq] ?? null, own_ctx($st, $seq));
             // A proof that verified before and is now merely unreachable keeps its status for a day.
             $prev = $checks[$seq] ?? null;
             if ($r['status'] === 'unreachable' && ($prev['status'] ?? '') === 'verified' && time() - (int)($prev['ok_at'] ?? 0) < 86400) {
                 $checks[$seq]['detail'] = 'Verified earlier; the last re-check could not reach the service.';
                 $checks[$seq]['at'] = time();
             } else {
-                $checks[$seq] = ['status' => $r['status'], 'detail' => $r['detail'], 'at' => time(), 'ok_at' => $r['status'] === 'verified' ? time() : (int)($prev['ok_at'] ?? 0)];
+                $checks[$seq] = ['status' => $r['status'], 'detail' => $r['detail'], 'at' => time(), 'ok_at' => $r['status'] === 'verified' ? time() : (int)($prev['ok_at'] ?? 0), 'alias' => (bool)($r['alias'] ?? false)];
             }
             $n++;
         }
@@ -210,4 +211,21 @@ function status_label(string $s): string
         'verified' => 'Verified', 'failed' => 'Failed', 'unreachable' => 'Not reachable right now',
         'pending' => 'Pending', 'witnessed' => 'Witnessed', 'unsupported' => 'Not supported here', 'revoked' => 'Revoked',
     ][$s] ?? $s;
+}
+
+/** Context for checking one of our own proofs (Seal Chat needs our keys + any attestation). */
+function own_ctx(array $st, int $seq): array
+{
+    $att = jread('attestations.json', []);
+    return ['fps' => $st['fps'] ?? [], 'url' => $st['url'] ?? null, 'attestation' => $att[(string)$seq] ?? null];
+}
+
+/** Our domains with a verified website or DNS proof: they work as aliases of this Seal ID (1.2.0). */
+function own_aliases(): array
+{
+    $out = [];
+    foreach (own_proofs() as $p) {
+        if (in_array($p['service'], ['web', 'dns'], true) && $p['status'] === 'verified' && $p['alias']) $out[$p['handle']] = true;
+    }
+    return array_keys($out);
 }

@@ -49,6 +49,7 @@ page_start($name . ' — Seal ID', [
       <div class="grow">
         <h1><?= h($name) ?></h1>
         <div class="idurl"><?= h($st['url']) ?></div>
+        <?php if ($aliases = own_aliases()): ?><div class="small muted">Also: <?= implode(' · ', array_map(fn($d) => '<a href="https://' . h($d) . '" rel="me noopener" target="_blank">' . h($d) . '</a>', $aliases)) ?></div><?php endif; ?>
         <?php if ($st['bio'] !== ''): ?><p class="muted bio"><?= nl2br(h($st['bio'])) ?></p><?php endif; ?>
       </div>
     </div>

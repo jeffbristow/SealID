@@ -20,7 +20,8 @@ final class Proof_dns extends ProofService
 
     public static function publishText(string $text, string $token): string
     {
-        return $token;
+        // 1.2.0: the record also names the Seal ID, so the domain works as an alias.
+        return preg_match('#(https://\S+) ' . preg_quote($token, '#') . '#', $text, $m) ? "$token id={$m[1]}" : $token;
     }
 
     public static function steps(string $handle, string $text, string $token): array
@@ -32,12 +33,18 @@ final class Proof_dns extends ProofService
         ];
     }
 
-    public static function check(string $handle, ?string $locator, string $token): array
+    public static function check(string $handle, ?string $locator, string $token, array $ctx = []): array
     {
         $txt = dns_txt("_seal-id.$handle");
         if ($txt === null) return self::res('unreachable', 'The DNS lookup failed.');
         foreach ($txt as $t) {
-            if (str_contains($t, $token)) return self::res('verified', "Found in the TXT record _seal-id.$handle.");
+            if (!str_contains($t, $token)) continue;
+            // 1.2.0: "id=<this Seal ID>" in the same or another record makes the domain an alias.
+            $url = $ctx['url'] ?? null;
+            $alias = $url !== null && (bool)array_filter($txt, fn($x) => preg_match('#\bid=' . preg_quote($url, '#') . '/?(\s|;|$)#', $x));
+            $r = self::res('verified', "Found in the TXT record _seal-id.$handle." . ($alias || $url === null ? '' : " To use $handle as your Seal ID address too, change the record to: $token id=$url"));
+            $r['alias'] = $alias;
+            return $r;
         }
         return self::res('failed', $txt ? "_seal-id.$handle has TXT records, but not this proof." : "No TXT record at _seal-id.$handle yet.");
     }

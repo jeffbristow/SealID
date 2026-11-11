@@ -5,7 +5,7 @@
  */
 declare(strict_types=1);
 
-const SEALID_VERSION = '1.1.0';
+const SEALID_VERSION = '1.2.0';
 const SEALID_REPO = 'https://github.com/jeffbristow/SealID';
 define('SEALID_ROOT', dirname(__DIR__));
 

@@ -132,9 +132,10 @@ if ($isPost) {
                 if ($url === null) fail(400, 'Enter a Seal ID address, e.g. id.example.com');
                 if ($url === $st['url']) fail(400, 'That is your own Seal ID.');
                 if (!rate_limit('peer', 30, 3600)) fail(429, 'Too many checks. Wait a while.');
-                $r = peer_verify($url, true);
+                $r = peer_lookup($url, true);           // 1.2.0: also accepts verified alias domains
+                if ($r['ok'] && $r['url'] === $st['url']) fail(400, 'That domain is an alias of your own Seal ID.');
                 if ($r['ok']) {
-                    $_SESSION['peer'][$url] = $r;
+                    $_SESSION['peer'][$r['url']] = $r;
                     if ($r['pin'] === 'new' || $r['pin'] === 'match') peer_pin_save($r);
                 }
                 json_out(['ok' => true, 'report' => $r]);
@@ -163,6 +164,29 @@ if ($isPost) {
                 if ($bytes === false) fail(400, 'That picture could not be read.');
                 try { $r = avatar_store_pending($bytes); } catch (RuntimeException $e) { fail(400, $e->getMessage()); }
                 json_out(['ok' => true] + $r);
+
+            // ---------------- Saved key: encrypted copy on this server (1.2.0, option B) ----------------
+            // The browser encrypts the private key (PBKDF2-SHA256 600k + AES-256-GCM) before
+            // sending it; the server only stores and returns that blob, to a signed-in owner.
+            case 'keystore_get':
+                json_out(['ok' => true, 'blob' => jread('keystore.json', null)]);
+
+            case 'keystore_put':
+                $blob = $b['blob'] ?? null;
+                $b64 = fn($v, $min, $max) => is_string($v) && strlen($v) >= $min && strlen($v) <= $max && base64_decode($v, true) !== false;
+                if (!is_array($blob) || ($blob['v'] ?? 0) !== 1 || ($blob['fp'] ?? '') !== $st['fp'] || ($blob['kdf'] ?? '') !== 'pbkdf2-sha256'
+                    || !is_int($blob['iter'] ?? null) || $blob['iter'] < 600000 || $blob['iter'] > 10000000
+                    || !$b64($blob['salt'] ?? null, 16, 64) || !$b64($blob['iv'] ?? null, 16, 32) || !$b64($blob['ct'] ?? null, 100, 400000)) {
+                    fail(400, 'That is not an encrypted key copy made by this page.');
+                }
+                if (empty(jread('auth.json', [])['password'])) fail(400, 'Set a fallback password first (below): on a new device you sign in with it, then unlock the copy with its passphrase.');
+                jwrite('keystore.json', ['v' => 1, 'fp' => $blob['fp'], 'kdf' => 'pbkdf2-sha256', 'iter' => $blob['iter'],
+                    'salt' => $blob['salt'], 'iv' => $blob['iv'], 'ct' => $blob['ct'], 'created' => time()]);
+                json_out(['ok' => true] + admin_state());
+
+            case 'keystore_delete':
+                @unlink(data_dir() . '/keystore.json');
+                json_out(['ok' => true] + admin_state());
 
             // ---------------- Updates ----------------
             case 'update_status':
@@ -317,7 +341,7 @@ function admin_state(): array
         $given[] = $v + ['notify' => $outbox[(string)$seq] ?? null];
     }
     $host = parse_url($st['url'], PHP_URL_HOST);
-    $dnsVal = 'v=sealid1; fp=' . $st['fp'] . implode('', array_map(fn($m) => '; mirror=' . $m, $st['mirrors']));
+    $dnsVal = 'v=sealid1; id=' . $st['url'] . '; fp=' . $st['fp'] . implode('', array_map(fn($m) => '; mirror=' . $m, $st['mirrors']));
     $dnsNow = peer_dns($st['url']);
     $auth = jread('auth.json', []);
     return [
@@ -336,6 +360,7 @@ function admin_state(): array
         'pins' => array_map(fn($p) => ['url' => $p['url'], 'name' => $p['name'] ?? '', 'fp' => $p['fp'], 'last_seen' => $p['last_seen'] ?? 0], peer_pins()),
         'dns' => ['name' => '_seal-id.' . $host, 'value' => $dnsVal, 'current' => $dnsNow['raw'] ?? null, 'ok' => ($dnsNow['fp'] ?? null) === $st['fp']],
         'has_password' => !empty($auth['password']),
+        'keystore' => ($ks = jread('keystore.json', null)) ? ['created' => $ks['created'] ?? 0, 'fp' => $ks['fp'] ?? null] : null,
         'reach_helper' => cfg('reach_helper', 'https://id.bristow.ch'),
         'bundle_ok' => is_file(SEALID_ROOT . '/.well-known/seal-id.json'),
         'version' => up_current(),
