@@ -17,11 +17,26 @@ function page_start(string $title, array $o = []): void
         . ($o['noindex'] ?? false ? '<meta name="robots" content="noindex">' : '')
         . '<link rel="icon" type="image/svg+xml" href="assets/seal-id.svg">'
         . '<link rel="stylesheet" href="assets/site.css?v=' . $v . '">'
+        // 1.2.2: an import map gives every module the version tag, including the ones that
+        // modules import from each other (./sign.js, ./keystore.js …). Without it a CDN such as
+        // Cloudflare keeps serving the previous version's helpers after an update.
+        . '<script type="importmap" nonce="' . h(csp_nonce()) . '">' . asset_import_map() . '</script>'
         . ($o['head'] ?? '')
         . '</head><body class="' . h($o['body_class'] ?? '') . '">';
     echo '<header class="topbar"><div class="wrap row between">'
         . '<a class="brand" href="./"><img src="assets/seal-id.svg" alt="" width="34" height="34"><span>Seal ID</span></a>'
         . '<nav class="nav">' . ($o['nav'] ?? '') . '</nav></div></header>';
+}
+
+/** {"imports": {"./assets/x.js": "./assets/x.js?v=<version>"}} for every script in assets/. */
+function asset_import_map(): string
+{
+    $map = [];
+    foreach (array_merge(glob(SEALID_ROOT . '/assets/*.js') ?: [], glob(SEALID_ROOT . '/assets/*.mjs') ?: []) as $f) {
+        $n = basename($f);
+        $map['./assets/' . $n] = './assets/' . $n . '?v=' . SEALID_VERSION;
+    }
+    return json_encode(['imports' => (object)$map], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
 }
 
 function page_end(array $modules = [], array $data = []): void

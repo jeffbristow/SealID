@@ -89,5 +89,8 @@ https addresses: proofs, vouching, inbox, withdrawal, mirror fallback).
   neighbours (HTTP 403). The updater falls back to github.com/<repo>/releases/latest (a redirect to
   the tag) + standard download URLs; notes come from the .sig file's "notes" (release.mjs fills it
   from dist/notes-<v>.md).
+- Cloudflare (in front of StackCP) caches assets per our Cache-Control (1 day). Module imports between
+  scripts (./sign.js) carry no ?v=, so lib/view.php emits an import map that versions every
+  assets/*.js|mjs. Never import an asset by a path the import map doesn't cover.
 - Reddit blocks datacenter IPs on its JSON API; its oEmbed endpoint works, so the
   Reddit proof lives in the post title.
