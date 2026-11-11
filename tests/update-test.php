@@ -1,6 +1,6 @@
 <?php
 /**
- * Updater test, run on its own:  php tests/update-test.php
+ * Updater test, run on its own:  php tests/update-test.php [dist/SealID-<v>.zip]
  *
  * Makes a throwaway install of src/ that claims to be version 1.0.9, builds a
  * package of the real src/ (signed with the real update key, read from
@@ -62,8 +62,10 @@ $makeZip = function (string $prefix, ?callable $tweak = null) use ($src): string
 $signFor = fn(string $v, string $zip) => json_encode(['version' => $v, 'sha256' => hash('sha256', $zip),
     'sig' => base64_encode(sodium_crypto_sign_detached("sealid-update-v1|$v|" . hash('sha256', $zip), $sk))]);
 
-$good = $makeZip("SealID-$ver/");
-$goodSig = $signFor($ver, $good);
+// Optional: test a built release instead (php tests/update-test.php dist/SealID-x.y.z.zip)
+$pkg = $argv[1] ?? null;
+$good = $pkg ? file_get_contents($pkg) : $makeZip("SealID-$ver/");
+$goodSig = $pkg ? file_get_contents($pkg . ".sig") : $signFor($ver, $good);
 
 require "$site/lib/bootstrap.php";
 

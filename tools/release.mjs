@@ -38,7 +38,7 @@ const priv = createPrivateKey(readFileSync(keyPath));
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 const zipPath = join(root, 'dist', `SealID-${ver}.zip`);
-git('archive', '--format=zip', `--prefix=SealID-${ver}/`, '-o', zipPath, `v${ver}:src`);
+git('-c', 'core.autocrlf=false', 'archive', '--format=zip', `--prefix=SealID-${ver}/`, '-o', zipPath, `v${ver}:src`);
 const zip = readFileSync(zipPath);
 const sha = createHash('sha256').update(zip).digest('hex');
 const text = `sealid-update-v1|${ver}|${sha}`;
