@@ -328,6 +328,27 @@ function admin_instructions(int $seq): array
     ];
 }
 
+/**
+ * 1.2.3: the addresses this Seal ID answers to — every domain proof, with whether
+ * it works as an alias and, if not, what is missing.
+ */
+function admin_addresses(array $st): array
+{
+    $out = [];
+    foreach (own_proofs() as $p) {
+        if (!in_array($p['service'], ['web', 'dns'], true)) continue;
+        if ($p['status'] !== 'verified') {
+            $why = 'The ' . ($p['service'] === 'dns' ? 'DNS' : 'website') . ' proof is not verified yet (' . status_label($p['status']) . ').';
+        } elseif (!$p['alias']) {
+            $why = 'Change the TXT record _seal-id.' . $p['handle'] . ' to: ' . $p['token'] . ' id=' . $st['url'] . ' — then press “Check now”.';
+        } else {
+            $why = null;
+        }
+        $out[] = ['domain' => $p['handle'], 'service' => $p['service'], 'seq' => $p['seq'], 'alias' => $why === null, 'why' => $why, 'checked' => $p['checked']];
+    }
+    return $out;
+}
+
 function admin_state(): array
 {
     $st = Chain::state(true);
@@ -352,6 +373,7 @@ function admin_state(): array
             'reset_from' => $st['reset_from'], 'fps' => $st['fps'],
         ],
         'proofs' => own_proofs(),
+        'addresses' => admin_addresses($st),
         'services' => $services,
         'given' => $given,
         'received' => jread('vouches.json', []),

@@ -74,7 +74,7 @@ r = await post('admin.php?a=login', { sig: await sign(r.payload) });
 ok('login with key', r.ok, r.error);
 if (r.csrf) csrf = r.csrf;
 r = await post('admin.php?a=state', {});
-ok('state', r.ok && r.identity.name === 'E2E Tester' && r.services.length === 11, r.error);
+ok('state', r.ok && r.identity.name === 'E2E Tester' && r.services.length === 11 && Array.isArray(r.addresses), r.error);
 
 // Add a proof (x needs a locator)
 r = await post('admin.php?a=prepare', { type: 'proof', service: 'x', handle: '@SomeOne' });
@@ -222,6 +222,8 @@ if (process.env.DEMO) {
   r = await post('admin.php?a=prepare', { type: 'profile', name: 'E2E Renamed', bio: 'Demo identity', avatar: r.sha });
   r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
   ok('demo picture', r.ok, r.error);
+  const ad = (r.addresses || []).find(a => a.domain === 'example.com');
+  ok('addresses: unverified DNS domain listed as not an alias, with the reason', ad && ad.alias === false && /not verified/.test(ad.why), JSON.stringify(ad));
   console.log('COOKIE ' + cookie);
 }
 console.log(fails ? `\n${fails} FAILED` : '\nall e2e checks passed');

@@ -211,7 +211,30 @@ function instructionsBox(ins, onSaved) {
   return box;
 }
 
+/** 1.2.3: the addresses people can use to find this Seal ID. */
+function addressesCard() {
+  const A = S.addresses || [];
+  const list = el('ul', { class: 'vlist' },
+    el('li', {}, el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who mono' }, S.identity.url), badge('verified'), el('span', { class: 'small muted' }, 'Main address')),
+      el('div', { class: 'tiny muted' }, 'Written into every signed statement, so it never changes.')));
+  for (const a of A) {
+    const check = el('button', { class: 'btn small', type: 'button' }, 'Check now');
+    check.addEventListener('click', () => busy(check, async () => { await api('recheck', { seq: a.seq }); render(); toast('Checked.'); }));
+    list.append(el('li', {},
+      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who mono' }, a.domain),
+        a.alias ? el('span', { class: 'badge s-verified' }, 'Alias') : el('span', { class: 'badge s-pending' }, 'Not an alias yet'),
+        el('span', { class: 'small muted' }, a.service === 'dns' ? 'Domain (DNS) proof' : 'Website proof')),
+      el('div', { class: 'tiny muted' }, a.alias ? 'People can type ' + a.domain + ' to find this Seal ID' + (a.checked ? ' · checked ' + ago(a.checked) : '') + '.' : a.why),
+      a.alias ? '' : el('div', { class: 'mt' }, check)));
+  }
+  return el('div', { class: 'card' },
+    el('h2', {}, 'Your addresses'),
+    el('p', { class: 'small muted' }, 'Every domain you prove with a Website or Domain (DNS) proof also leads to this Seal ID — there is nothing to choose. Website proofs work at once; DNS proofs need the record to name this Seal ID (id=…).'),
+    A.length ? list : el('div', {}, list, el('p', { class: 'small muted mt' }, 'Add a Website or Domain (DNS) proof below to use your own domain as an address.')));
+}
+
 function renderProofs(root) {
+  root.append(addressesCard());
   // Add a proof
   const sel = el('select', {}, S.services.map(s => el('option', { value: s.id }, s.label + (s.auto ? '' : ' (witnessed)'))));
   const handle = el('input', { type: 'text', placeholder: S.services[0].hint });
