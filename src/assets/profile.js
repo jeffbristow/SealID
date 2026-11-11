@@ -22,3 +22,13 @@ fetch('api.php?a=status', { headers: { Accept: 'application/json' } })
     }
   })
   .catch(() => {});
+
+// 1.3.0: click a Seal Chat ID to copy it
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-copy]');
+  if (!t) return;
+  (navigator.clipboard ? navigator.clipboard.writeText(t.dataset.copy) : Promise.reject()).then(() => {
+    t.classList.add('copied');
+    setTimeout(() => t.classList.remove('copied'), 1500);
+  }).catch(() => {});
+});

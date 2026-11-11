@@ -207,6 +207,17 @@ if ($isPost) {
                 json_out(['ok' => true, 'message' => $msg, 'update' => up_state()]);
 
             // ---------------- Settings ----------------
+            case 'order':
+                // 1.3.0: the owner's display order for proofs and addresses (cosmetic: not signed)
+                $known = array_map('intval', array_keys($st['proofs']));
+                $proofs = array_values(array_unique(array_filter(array_map('intval', (array)($b['proofs'] ?? [])), fn($s) => in_array($s, $known, true))));
+                $domains = [];
+                foreach ($st['proofs'] as $p) if (in_array($p['service'], ['web', 'dns'], true)) $domains[] = $p['handle'];
+                $aliases = array_values(array_unique(array_filter(array_map('strval', (array)($b['aliases'] ?? [])), fn($d) => in_array($d, $domains, true))));
+                jwrite('order.json', ['proofs' => $proofs, 'aliases' => $aliases]);
+                Chain::writeBundle();
+                json_out(['ok' => true] + admin_state());
+
             case 'update_key':
                 try { Chain::updateKey((string)($b['key'] ?? '')); } catch (ChainError | PgpError $e) { fail(400, $e->getMessage()); }
                 json_out(['ok' => true] + admin_state());
@@ -344,9 +355,15 @@ function admin_addresses(array $st): array
         } else {
             $why = null;
         }
-        $out[] = ['domain' => $p['handle'], 'service' => $p['service'], 'seq' => $p['seq'], 'alias' => $why === null, 'why' => $why, 'checked' => $p['checked']];
+        $out[] = ['domain' => $p['handle'], 'service' => $p['service'], 'seq' => $p['seq'], 'alias' => $why === null, 'why' => $why, 'checked' => $p['checked'], 'favicon' => $p['favicon'] ?? null];
     }
-    return $out;
+    // 1.3.0: the owner's address order; unplaced ones keep their place after the placed ones
+    $order = array_flip(own_order()['aliases']);
+    $i = 0;
+    foreach ($out as &$a) $a['_i'] = $i++;
+    unset($a);
+    usort($out, fn($x, $y) => [$order[$x['domain']] ?? PHP_INT_MAX, $x['_i']] <=> [$order[$y['domain']] ?? PHP_INT_MAX, $y['_i']]);
+    return array_map(function ($a) { unset($a['_i']); return $a; }, $out);
 }
 
 function admin_state(): array

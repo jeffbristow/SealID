@@ -88,6 +88,24 @@ r = await post('admin.php?a=locator', { seq, url: 'https://twitter.com/someone/s
 ok('locator saved + checked', r.ok && r.proofs[0].locator === 'https://x.com/SomeOne/status/1234567890', r.error);
 console.log('     x check result:', r.proofs[0].status, '-', r.proofs[0].detail);
 
+// Owner's order (1.3.0): a second proof is newest, so it comes first until the owner moves it
+r = await post('admin.php?a=prepare', { type: 'proof', service: 'sealchat', handle: 'sealchat:' + 'a'.repeat(55) + 'd:' + priv.getFingerprint().toUpperCase() });
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+const seq2 = r.seq;
+ok('second proof', r.ok && r.proofs[0].seq === seq2, r.error);
+r = await post('admin.php?a=order', { proofs: [seq, seq2, 999], aliases: ['not-mine.example'] });
+ok('order saved (unknown entries dropped)', r.ok && r.proofs.map(p => p.seq).join() === [seq, seq2].join(), r.error);
+p = await page('index.php');
+ok('profile page follows the order', p.html.indexOf('data-seq="' + seq + '"') < p.html.indexOf('data-seq="' + seq2 + '"'));
+ok('profile page shows icons', p.html.includes('icons.svg?v=') && p.html.includes('#x"') && p.html.includes('assets/sealchat.png'));
+ok('Seal Chat ID shown short with the full ID on hover', /class="tip"[^>]*data-tip="sealchat:a{55}d:/.test(p.html));
+b = await (await req('api.php?a=bundle')).json();
+ok('bundle carries the order hint', b.order && b.order.proofs.join() === [seq, seq2].join() && b.order.aliases.length === 0);
+ok('favicon only for own domains', (await req('api.php?a=favicon&d=example.com')).status === 404);
+r = await post('admin.php?a=prepare', { type: 'revoke', seqs: [seq2] });
+r = await post('admin.php?a=append', { payload: r.payload, sig: await sign(r.payload) });
+ok('second proof revoked', r.ok && r.proofs.length === 1, r.error);
+
 // Profile picture (1.1.0)
 const { deflateSync } = await import('node:zlib');
 const { createHash } = await import('node:crypto');
@@ -209,7 +227,7 @@ r = await post('admin.php?a=login', { password: 'correct horse battery' });
 ok('password login', r.ok, r.error);
 
 b = await (await req('.well-known/seal-id.json')).json();
-ok('final bundle has 9 links', b.chain.length === 9, String(b.chain.length));
+ok('final bundle has 11 links', b.chain.length === 11, String(b.chain.length));
 
 // Leave a few proofs in place for looking at the UI (DEMO=1)
 if (process.env.DEMO) {

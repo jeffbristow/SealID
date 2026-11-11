@@ -151,9 +151,23 @@ function own_proofs(): array
             'alias' => $p['service'] === 'web' || !empty($c['alias']),
             'witnesses' => $w,
             'vouchers' => array_values(array_unique($wit[$seq]['all'] ?? [])),
+            'favicon' => in_array($p['service'], ['web', 'dns'], true) && function_exists('favicon_url') ? favicon_url($p['handle']) : null,   // 1.3.0
         ];
     }
+    // 1.3.0: the owner's order (proofs not placed yet go after the placed ones, newest first)
+    $order = array_flip(array_map('intval', (array)(jread('order.json', [])['proofs'] ?? [])));
+    $i = 0;
+    foreach ($out as &$o) { $o['_i'] = $i++; } unset($o);
+    usort($out, fn($a, $b) => [$order[$a['seq']] ?? PHP_INT_MAX, $a['_i']] <=> [$order[$b['seq']] ?? PHP_INT_MAX, $b['_i']]);
+    foreach ($out as &$o) unset($o['_i']); unset($o);
     return $out;
+}
+
+/** 1.3.0: the display order chosen by the owner: { proofs: [seq…], aliases: [domain…] }. */
+function own_order(): array
+{
+    $o = jread('order.json', []);
+    return ['proofs' => array_values(array_map('intval', (array)($o['proofs'] ?? []))), 'aliases' => array_values(array_map('strval', (array)($o['aliases'] ?? [])))];
 }
 
 /**
@@ -199,6 +213,12 @@ function own_recheck(int $max = 3, bool $force = false, ?int $onlySeq = null): i
             jwrite('checks.json', $checks);
             Chain::writeBundle();
         }
+        // 1.3.0: icons for proven domains (one fetch per call at most; weekly)
+        if (function_exists('favicons_refresh')) {
+            $domains = [];
+            foreach ($st['proofs'] as $p) if (in_array($p['service'], ['web', 'dns'], true)) $domains[] = $p['handle'];
+            favicons_refresh(array_values(array_unique($domains)), $force ? 3 : 1);
+        }
         return $n;
     } finally {
         flock($lh, LOCK_UN);
@@ -228,5 +248,9 @@ function own_aliases(): array
     foreach (own_proofs() as $p) {
         if (in_array($p['service'], ['web', 'dns'], true) && $p['status'] === 'verified' && $p['alias']) $out[$p['handle']] = true;
     }
-    return array_keys($out);
+    // 1.3.0: the owner's order for addresses
+    $order = array_flip(own_order()['aliases']);
+    $list = array_keys($out);
+    usort($list, fn($a, $b) => [$order[$a] ?? PHP_INT_MAX, array_search($a, array_keys($out), true)] <=> [$order[$b] ?? PHP_INT_MAX, array_search($b, array_keys($out), true)]);
+    return $list;
 }

@@ -41,6 +41,20 @@ try {
             readfile($av['file']);
             exit;
 
+        case 'favicon':
+            // 1.3.0: the icon of a domain THIS Seal ID proves (fetched and re-drawn by this server)
+            $d = strtolower((string)($_GET['d'] ?? ''));
+            $mine = false;
+            foreach ((Chain::state()['proofs'] ?? []) as $p) if (in_array($p['service'], ['web', 'dns'], true) && $p['handle'] === $d) $mine = true;
+            $f = $mine ? favicon_path($d) : '';
+            if (!$mine || !is_file($f)) { http_response_code(404); exit; }
+            header('Content-Type: image/png');
+            header('Cache-Control: public, max-age=86400');
+            header('X-Content-Type-Options: nosniff');
+            header("Content-Security-Policy: default-src 'none'; sandbox");
+            readfile($f);
+            exit;
+
         case 'key':
             $st = Chain::state();
             if (empty($st['key'])) { http_response_code(404); exit; }

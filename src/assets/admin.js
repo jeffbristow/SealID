@@ -71,7 +71,84 @@ const LETTERS = { web: 'W', dns: 'D', github: 'GH', x: 'X', mastodon: 'M', blues
 const avatarEl = (src, name, cls = 'avatar') => src
   ? el('img', { class: cls + ' avatar-img', src, alt: '' })
   : el('div', { class: cls, 'aria-hidden': 'true' }, (name || '?').slice(0, 1).toUpperCase());
-const svc = id => el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
+/* 1.3.0: proof icons — platform logos (tinted green by CSS), the Seal Chat logo, a domain's favicon or a globe */
+const AV = new URL(import.meta.url).searchParams.get('v') || '';
+const BRANDS = ['x', 'facebook', 'github', 'mastodon', 'bluesky', 'reddit', 'youtube', 'hackernews'];
+function sprite(id) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('class', 'svc-ico');
+  s.setAttribute('aria-hidden', 'true');
+  const u = document.createElementNS(NS, 'use');
+  u.setAttribute('href', 'assets/icons.svg?v=' + AV + '#' + id);
+  s.append(u);
+  return s;
+}
+function svcIcon(id, favicon) {
+  if (id === 'sealchat') return el('img', { class: 'svc-img', src: 'assets/sealchat.png?v=' + AV, alt: '' });
+  if (id === 'web' || id === 'dns') return favicon ? el('img', { class: 'svc-img', src: favicon, alt: '' }) : sprite('globe');
+  if (BRANDS.includes(id)) return sprite(id);
+  return LETTERS[id] || id.slice(0, 1).toUpperCase();
+}
+const svc = (id, favicon) => el('div', { class: 'svc svc-' + id, 'aria-hidden': 'true' }, svcIcon(id, favicon));
+/** A Seal ID's Seal Chat ID is long: show a short form, the full ID on hover/focus, copy on click. */
+const sealchatHandle = h => el('span', { class: 'tip', tabindex: '0', 'data-tip': h, 'data-copy': h },
+  'Seal Chat ID ', el('span', { class: 'mono faint small' }, '…' + h.slice(-8)));
+const handleEl = p => p.service === 'sealchat' ? sealchatHandle(p.handle)
+  : p.profile ? el('a', { href: p.profile, target: '_blank', rel: 'noopener' }, p.handle) : p.handle;
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-copy]');
+  if (!t || !navigator.clipboard) return;
+  navigator.clipboard.writeText(t.dataset.copy).then(() => { t.classList.add('copied'); setTimeout(() => t.classList.remove('copied'), 1500); }).catch(() => {});
+});
+
+/* 1.3.0: the owner arranges proofs and addresses (▲/▼ or drag the handle). Saved unsigned, display only. */
+const moved = (arr, from, to) => { const a = arr.slice(); const [x] = a.splice(from, 1); a.splice(to, 0, x); return a; };
+async function saveOrder(proofs, aliases) {
+  try { await api('order', { proofs, aliases }); render(); }
+  catch (e) { toast(e.message, true); }
+}
+const proofSeqs = () => S.proofs.map(p => p.seq);
+const aliasDomains = () => (S.addresses || []).map(a => a.domain);
+function orderBtns(i, n, move) {
+  const up = el('button', { type: 'button', title: 'Move up', 'aria-label': 'Move up' }, '▲');
+  const dn = el('button', { type: 'button', title: 'Move down', 'aria-label': 'Move down' }, '▼');
+  up.disabled = i === 0;
+  dn.disabled = i === n - 1;
+  up.addEventListener('click', () => move(i, i - 1));
+  dn.addEventListener('click', () => move(i, i + 1));
+  return el('div', { class: 'order-btns' }, up, dn);
+}
+const dragHandle = () => el('span', { class: 'drag', draggable: 'true', title: 'Drag to move', 'aria-hidden': 'true' }, '⠿');
+function sortable(ul, move) {
+  let from = null;
+  const clear = () => ul.querySelectorAll('.dragging, .drop-above').forEach(x => x.classList.remove('dragging', 'drop-above'));
+  ul.addEventListener('dragstart', e => {
+    const li = e.target.closest && e.target.closest('li[data-idx]');
+    if (!li || !e.target.classList.contains('drag')) return;
+    from = +li.dataset.idx;
+    li.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(from));
+    e.dataTransfer.setDragImage(li, 20, 20);
+  });
+  ul.addEventListener('dragend', () => { clear(); from = null; });
+  ul.addEventListener('dragover', e => {
+    const li = from !== null && e.target.closest('li[data-idx]');
+    if (!li) return;
+    e.preventDefault();
+    if (!li.classList.contains('drop-above')) { ul.querySelectorAll('.drop-above').forEach(x => x.classList.remove('drop-above')); li.classList.add('drop-above'); }
+  });
+  ul.addEventListener('drop', e => {
+    const li = from !== null && e.target.closest('li[data-idx]');
+    if (!li) return;
+    e.preventDefault();
+    const to = +li.dataset.idx, f = from;
+    clear();
+    from = null;
+    if (to !== f) move(f, to);
+  });
+}
 
 /* ------------------------------------------------------------------ *
  * Sign-in
@@ -217,19 +294,27 @@ function addressesCard() {
   const list = el('ul', { class: 'vlist' },
     el('li', {}, el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who mono' }, S.identity.url), badge('verified'), el('span', { class: 'small muted' }, 'Main address')),
       el('div', { class: 'tiny muted' }, 'Written into every signed statement, so it never changes.')));
-  for (const a of A) {
+  const many = A.length > 1;
+  const move = (f, t) => saveOrder(proofSeqs(), moved(aliasDomains(), f, t));
+  A.forEach((a, i) => {
     const check = el('button', { class: 'btn small', type: 'button' }, 'Check now');
     check.addEventListener('click', () => busy(check, async () => { await api('recheck', { seq: a.seq }); render(); toast('Checked.'); }));
-    list.append(el('li', {},
-      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who mono' }, a.domain),
-        a.alias ? el('span', { class: 'badge s-verified' }, 'Alias') : el('span', { class: 'badge s-pending' }, 'Not an alias yet'),
-        el('span', { class: 'small muted' }, a.service === 'dns' ? 'Domain (DNS) proof' : 'Website proof')),
-      el('div', { class: 'tiny muted' }, a.alias ? 'People can type ' + a.domain + ' to find this Seal ID' + (a.checked ? ' · checked ' + ago(a.checked) : '') + '.' : a.why),
-      a.alias ? '' : el('div', { class: 'mt' }, check)));
-  }
+    list.append(el('li', { class: 'sortable-row', 'data-idx': i },
+      many ? dragHandle() : null,
+      el('div', { class: 'grow' },
+        el('div', { class: 'row wrapline gap-sm' },
+          el('span', { class: 'who mono' }, a.favicon ? el('img', { class: 'alias-ico', src: a.favicon, alt: '' }) : null, a.domain),
+          a.alias ? el('span', { class: 'badge s-verified' }, 'Alias') : el('span', { class: 'badge s-pending' }, 'Not an alias yet'),
+          el('span', { class: 'small muted' }, a.service === 'dns' ? 'Domain (DNS) proof' : 'Website proof')),
+        el('div', { class: 'tiny muted' }, a.alias ? 'People can type ' + a.domain + ' to find this Seal ID' + (a.checked ? ' · checked ' + ago(a.checked) : '') + '.' : a.why),
+        a.alias ? '' : el('div', { class: 'mt' }, check)),
+      many ? orderBtns(i, A.length, move) : null));
+  });
+  if (many) sortable(list, move);
   return el('div', { class: 'card' },
     el('h2', {}, 'Your addresses'),
-    el('p', { class: 'small muted' }, 'Every domain you prove with a Website or Domain (DNS) proof also leads to this Seal ID — there is nothing to choose. Website proofs work at once; DNS proofs need the record to name this Seal ID (id=…).'),
+    el('p', { class: 'small muted' }, 'Every domain you prove with a Website or Domain (DNS) proof also leads to this Seal ID — there is nothing to choose. Website proofs work at once; DNS proofs need the record to name this Seal ID (id=…).'
+      + (many ? ' Use ▲/▼ or drag ⠿ to set the order your page shows them in.' : '')),
     A.length ? list : el('div', {}, list, el('p', { class: 'small muted mt' }, 'Add a Website or Domain (DNS) proof below to use your own domain as an address.')));
 }
 
@@ -258,7 +343,9 @@ function renderProofs(root) {
   // List
   const list = el('ul', { class: 'proofs' });
   if (!S.proofs.length) list.append(el('li', { class: 'muted small' }, 'No proofs yet. Start with your website or a domain.'));
-  for (const p of S.proofs) {
+  const many = S.proofs.length > 1;
+  const move = (f, t) => saveOrder(moved(proofSeqs(), f, t), aliasDomains());
+  S.proofs.forEach((p, i) => {
     const g = el('div', { class: 'grow' });
     const recheck = el('button', { class: 'btn small', type: 'button' }, 'Check now');
     recheck.addEventListener('click', () => busy(recheck, async () => { await api('recheck', { seq: p.seq }); render(); toast('Checked.'); }));
@@ -274,17 +361,20 @@ function renderProofs(root) {
       if (r) { render(); toast('Revoked.'); }
     }));
     g.append(
-      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, p.profile ? el('a', { href: p.profile, target: '_blank', rel: 'noopener' }, p.handle) : p.handle),
+      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, handleEl(p)),
         el('span', { class: 'small muted' }, p.label), badge(p.status, p.detail)),
       el('div', { class: 'meta' }, p.detail, p.checked ? ' · checked ' + ago(p.checked) : '',
         p.locator ? [' · ', el('a', { href: p.locator, target: '_blank', rel: 'noopener' }, 'proof post')] : '',
         p.witnesses.length ? ' · witnessed by ' + p.witnesses.length : ''),
       el('div', { class: 'actions' }, p.auto ? recheck : null, how, revoke));
-    list.append(el('li', { class: 'proof', 'data-seq': p.seq }, svc(p.service), g));
-  }
+    list.append(el('li', { class: 'proof', 'data-seq': p.seq, 'data-idx': i },
+      many ? dragHandle() : null, svc(p.service, p.favicon), g, many ? orderBtns(i, S.proofs.length, move) : null));
+  });
+  if (many) sortable(list, move);
   const all = el('button', { class: 'btn small', type: 'button' }, 'Re-check all');
   all.addEventListener('click', () => busy(all, async () => { await api('recheck', {}); render(); }));
-  root.append(el('div', { class: 'card' }, el('div', { class: 'row between' }, el('h2', {}, 'Your proofs'), S.proofs.length ? all : null), list));
+  root.append(el('div', { class: 'card' }, el('div', { class: 'row between' }, el('h2', {}, 'Your proofs'), S.proofs.length ? all : null),
+    many ? el('p', { class: 'small muted' }, 'Use ▲/▼ or drag ⠿ to arrange them; your public page shows them in this order.') : null, list));
 }
 
 /* ------------------------------------------------------------------ *
@@ -383,7 +473,7 @@ function drawReport(out, r) {
     sync();
     const witnessText = 'Verifying my Seal ID ' + r.url + ' ' + p.token;
     list.append(el('li', { class: 'proof' }, svc(p.service), el('div', { class: 'grow' },
-      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, p.profile ? el('a', { href: p.profile, target: '_blank', rel: 'noopener' }, p.handle) : p.handle),
+      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, handleEl(p)),
         el('span', { class: 'small muted' }, p.label), badge(p.status, p.detail)),
       el('div', { class: 'meta' }, p.detail, p.locator ? [' · ', el('a', { href: p.locator, target: '_blank', rel: 'noopener' }, 'open the proof post')] : ''),
       el('label', { class: 'check mt' }, auto, el('span', {}, canAuto ? 'Vouch: my server verified this' : 'My server could not verify this automatically')),

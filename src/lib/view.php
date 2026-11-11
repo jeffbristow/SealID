@@ -81,6 +81,31 @@ function ago(int $ts): string
     return date('j M Y', $ts);
 }
 
+/**
+ * 1.3.0: the icon for a proof — the platform's logo (tinted with the accent green),
+ * the Seal Chat logo, a domain's favicon (fetched and cached by this server) or a globe.
+ */
+function service_icon(string $service, ?string $favicon = null): string
+{
+    $v = h(SEALID_VERSION);
+    if ($service === 'sealchat') return '<img class="svc-img" src="assets/sealchat.png?v=' . $v . '" alt="Seal Chat">';
+    if (in_array($service, ['web', 'dns'], true)) {
+        return $favicon ? '<img class="svc-img" src="' . h($favicon) . '" alt="">'
+            : '<svg class="svc-ico" aria-hidden="true"><use href="assets/icons.svg?v=' . $v . '#globe"/></svg>';
+    }
+    if (in_array($service, ['x', 'facebook', 'github', 'mastodon', 'bluesky', 'reddit', 'youtube', 'hackernews'], true)) {
+        return '<svg class="svc-ico" aria-hidden="true"><use href="assets/icons.svg?v=' . $v . '#' . $service . '"/></svg>';
+    }
+    return h(service_letter($service));
+}
+
+/** 1.3.0: a Seal Chat ID is long — show "Seal Chat" with the full ID on hover / focus (and copy on click). */
+function sealchat_handle_html(string $handle): string
+{
+    $fp = substr($handle, strrpos($handle, ':') + 1);
+    return '<span class="tip" tabindex="0" data-tip="' . h($handle) . '" data-copy="' . h($handle) . '">Seal Chat ID <span class="mono faint small">…' . h(substr($fp, -8)) . '</span></span>';
+}
+
 function service_letter(string $service): string
 {
     return [

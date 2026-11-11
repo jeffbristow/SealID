@@ -49,7 +49,7 @@ page_start($name . ' — Seal ID', [
       <div class="grow">
         <h1><?= h($name) ?></h1>
         <div class="idurl"><?= h($st['url']) ?></div>
-        <?php if ($aliases = own_aliases()): ?><div class="small muted">Also: <?= implode(' · ', array_map(fn($d) => '<a href="https://' . h($d) . '" rel="me noopener" target="_blank">' . h($d) . '</a>', $aliases)) ?></div><?php endif; ?>
+        <?php if ($aliases = own_aliases()): ?><div class="small muted aliases">Also: <?= implode(' · ', array_map(fn($d) => '<a href="https://' . h($d) . '" rel="me noopener" target="_blank">' . (($fi = favicon_url($d)) ? '<img class="alias-ico" src="' . h($fi) . '" alt="">' : '') . h($d) . '</a>', $aliases)) ?></div><?php endif; ?>
         <?php if ($st['bio'] !== ''): ?><p class="muted bio"><?= nl2br(h($st['bio'])) ?></p><?php endif; ?>
       </div>
     </div>
@@ -71,10 +71,10 @@ page_start($name . ' — Seal ID', [
     <ul class="proofs">
       <?php foreach ($proofs as $p): ?>
       <li class="proof" data-seq="<?= (int)$p['seq'] ?>">
-        <div class="svc" aria-hidden="true"><?= h(service_letter($p['service'])) ?></div>
+        <div class="svc svc-<?= h($p['service']) ?>" title="<?= h($p['label']) ?>"><?= service_icon($p['service'], $p['favicon'] ?? null) ?></div>
         <div class="grow">
           <div class="row wrapline gap-sm">
-            <span class="who"><?php if ($p['profile']): ?><a href="<?= h($p['profile']) ?>" target="_blank" rel="noopener nofollow"><?= h($p['handle']) ?></a><?php else: ?><?= h($p['handle']) ?><?php endif; ?></span>
+            <span class="who"><?php if ($p['service'] === 'sealchat'): ?><?= sealchat_handle_html($p['handle']) ?><?php elseif ($p['profile']): ?><a href="<?= h($p['profile']) ?>" target="_blank" rel="noopener nofollow"><?= h($p['handle']) ?></a><?php else: ?><?= h($p['handle']) ?><?php endif; ?></span>
             <span class="small muted"><?= h($p['label']) ?></span>
             <span class="js-badge"><?= status_badge($p['status'], $p['detail']) ?></span>
           </div>

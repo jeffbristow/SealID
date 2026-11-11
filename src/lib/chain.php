@@ -349,6 +349,8 @@ final class Chain
             // domains this identity answers to (unsigned hint: each is a proof anyone can re-check).
             'attestations' => (object)array_filter(jread('attestations.json', []), fn($k) => isset($st['proofs'][(int)$k]), ARRAY_FILTER_USE_KEY),
             'aliases' => function_exists('own_aliases') ? own_aliases() : [],
+            // 1.3.0: the owner's display order (a hint for pages that show this Seal ID)
+            'order' => function_exists('own_order') ? (object)own_order() : null,
             // 1.1.0: where to fetch the profile picture; its hash is signed in the chain.
             'avatar' => ($av = avatar_current()) ? ['url' => 'api.php?a=avatar&h=' . substr($av['sha'], 0, 16), 'sha256' => $av['sha'], 'type' => $av['mime']] : null,
             'software' => 'SealID/' . SEALID_VERSION,
