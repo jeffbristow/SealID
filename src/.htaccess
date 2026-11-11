@@ -1,0 +1,35 @@
+# Seal ID
+Options -Indexes
+DirectoryIndex index.php
+
+# Never serve configuration or local data.
+<FilesMatch "^(config\.php|config\.example\.php|\.lock|.*\.tmp[0-9a-f]*)$">
+    Require all denied
+</FilesMatch>
+RedirectMatch 404 /(lib|data|\.sealid-data)(/|$)
+
+# HTTPS only.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set Strict-Transport-Security "max-age=31536000"
+    Header always set X-Content-Type-Options "nosniff"
+    # The bundle is public and meant to be fetched by other Seal IDs and apps.
+    <FilesMatch "^seal-id\.json$">
+        Header set Access-Control-Allow-Origin "*"
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+    <FilesMatch "\.(css|js|mjs|svg)$">
+        Header set Cache-Control "public, max-age=86400"
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_mime.c>
+    AddType application/json .json
+    AddType text/javascript .mjs
+</IfModule>

@@ -1,0 +1,424 @@
+// Seal ID — admin page.
+import { signer, el, toast, copyBox, keyForm, signDialog, fpGroups } from './sign.js';
+
+const D = JSON.parse(document.getElementById('sealid-data').textContent);
+const app = document.getElementById('app');
+let S = null;              // last admin state from the server
+let tab = 'proofs';
+let peerReport = null;     // last "check another Seal ID" report
+
+/* ------------------------------------------------------------------ */
+async function api(action, body) {
+  const r = await fetch('admin.php?a=' + action, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF': D.csrf }, body: JSON.stringify(body || {}),
+  });
+  let j = null;
+  try { j = await r.json(); } catch { /* not JSON */ }
+  if (r.status === 401) { D.admin = false; renderLogin(); throw new Error('Please sign in again.'); }
+  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('Server error (HTTP ' + r.status + ')'));
+  if (j.identity) S = j;
+  return j;
+}
+
+/** prepare → sign → append. Returns the append answer or null if cancelled. */
+async function signStatement(body, title, explain) {
+  const prep = await api('prepare', body);
+  const sig = await signDialog({ title, explain, payload: prep.payload, expectFp: S.identity.fp });
+  if (!sig) return null;
+  return api('append', { payload: prep.payload, sig });
+}
+
+const busy = async (btn, fn) => {
+  const t = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try { return await fn(); }
+  catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = t; }
+};
+
+function ago(ts) {
+  if (!ts) return 'never';
+  const d = Date.now() / 1000 - ts;
+  if (d < 90) return 'just now';
+  if (d < 5400) return Math.round(d / 60) + ' min ago';
+  if (d < 129600) return Math.round(d / 3600) + ' h ago';
+  if (d < 86400 * 45) return Math.round(d / 86400) + ' days ago';
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+const LABELS = { verified: 'Verified', failed: 'Failed', unreachable: 'Not reachable right now', pending: 'Pending', witnessed: 'Witnessed', unsupported: 'Not supported here' };
+const badge = (s, title) => el('span', { class: 'badge s-' + s, title: title || '' }, LABELS[s] || s);
+const LETTERS = { web: 'W', dns: 'D', github: 'GH', x: 'X', mastodon: 'M', bluesky: 'B', hackernews: 'Y', reddit: 'R', youtube: 'YT', facebook: 'F' };
+const svc = id => el('div', { class: 'svc', 'aria-hidden': 'true' }, LETTERS[id] || id.slice(0, 1).toUpperCase());
+
+/* ------------------------------------------------------------------ *
+ * Sign-in
+ * ------------------------------------------------------------------ */
+function renderLogin() {
+  const err = el('div', { class: 'notice bad hidden' });
+  const fail = e => { err.textContent = e.message; err.classList.remove('hidden'); };
+  const keyBtn = el('button', { class: 'btn primary', type: 'button' }, 'Sign in with my key');
+  keyBtn.addEventListener('click', () => busy(keyBtn, async () => {
+    err.classList.add('hidden');
+    const c = await api('challenge');
+    const sig = await signDialog({ title: 'Sign in', explain: 'Sign this one-time challenge to prove you hold the key of ' + D.url + '.', payload: c.payload, expectFp: D.fp });
+    if (!sig) return;
+    try { const r = await api('login', { sig }); D.csrf = r.csrf || D.csrf; D.admin = true; await load(); }
+    catch (e) { fail(e); }
+  }));
+  let pwBox = null;
+  if (D.has_password) {
+    const pw = el('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Fallback password' });
+    const go = el('button', { class: 'btn', type: 'button' }, 'Sign in with password');
+    const submit = () => busy(go, async () => {
+      err.classList.add('hidden');
+      try { const r = await api('login', { password: pw.value }); D.csrf = r.csrf || D.csrf; D.admin = true; await load(); }
+      catch (e) { fail(e); }
+    });
+    go.addEventListener('click', submit);
+    pw.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    pwBox = el('div', { class: 'stack mt-lg' }, el('div', { class: 'small muted' }, 'or'), pw, go);
+  }
+  app.replaceChildren(el('div', { class: 'card stack narrow-card' },
+    el('img', { src: 'assets/seal-id.svg', alt: '', width: 80, height: 80 }),
+    el('h1', {}, 'Sign in'),
+    el('p', { class: 'muted' }, 'Owner of ', el('span', { class: 'mono' }, D.url)),
+    err, keyBtn, pwBox));
+}
+
+/* ------------------------------------------------------------------ *
+ * Main layout
+ * ------------------------------------------------------------------ */
+async function load() {
+  await api('state');
+  render();
+}
+
+function keyBar() {
+  const bar = el('div', { class: 'keybar' });
+  const draw = () => {
+    bar.replaceChildren();
+    if (signer.loaded()) {
+      bar.append(el('span', { class: 'row' }, el('span', { class: 'dot on' }), el('span', {}, 'Signing key unlocked in this tab: ', el('span', { class: 'mono' }, fpGroups(signer.fp()).slice(-19)))),
+        el('button', { class: 'btn small right', type: 'button', onclick: () => signer.forget() }, 'Forget key'));
+    } else {
+      bar.append(el('span', { class: 'row' }, el('span', { class: 'dot' }), el('span', { class: 'muted' }, 'Signing key not loaded — you’ll be asked when something needs a signature.')),
+        el('button', { class: 'btn small right', type: 'button', onclick: unlockModal }, 'Unlock key'));
+    }
+  };
+  signer.onChange(draw);
+  draw();
+  return bar;
+}
+
+function unlockModal() {
+  const modal = el('div', { class: 'modal' });
+  const close = () => modal.remove();
+  modal.append(el('div', { class: 'box' },
+    el('div', { class: 'row between' }, el('h2', { class: 'mb0' }, 'Unlock your key'), el('button', { class: 'btn small ghost', type: 'button', onclick: close }, 'Close')),
+    keyForm({ expectFp: S.identity.fp, onLoaded: () => { close(); toast('Key unlocked for this tab.'); } })));
+  document.body.append(modal);
+}
+
+function render() {
+  const I = S.identity;
+  const tabs = [['proofs', 'Proofs'], ['vouch', 'Vouch'], ['profile', 'Profile'], ['settings', 'Settings']];
+  const body = el('div');
+  const tabBar = el('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) =>
+    el('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(tab === id), onclick: () => { tab = id; render(); } }, label)));
+  app.replaceChildren(
+    el('div', { class: 'row between' },
+      el('div', {}, el('h1', { class: 'mb0' }, I.name || 'Seal ID'), el('div', { class: 'idurl' }, I.url)),
+      el('button', { class: 'btn small ghost', type: 'button', onclick: async () => { await api('logout').catch(() => {}); signer.forget(); location.reload(); } }, 'Sign out')),
+    el('div', { class: 'fp mt' }, fpGroups(I.fp), ' · ', I.algo, ' · ', I.seq + ' signed statements'),
+    el('div', { class: 'mt' }, keyBar()),
+    tabBar, body);
+  ({ proofs: renderProofs, vouch: renderVouch, profile: renderProfile, settings: renderSettings })[tab](body);
+}
+
+/* ------------------------------------------------------------------ *
+ * Proofs tab
+ * ------------------------------------------------------------------ */
+function instructionsBox(ins, onSaved) {
+  const box = el('div', { class: 'notice stack mt' });
+  const steps = el('ol', { class: 'steps' });
+  // The proof text goes under the first step that ends with a colon.
+  let at = ins.steps.findIndex(s => s.replace(/<[^>]+>/g, '').trim().endsWith(':'));
+  if (at < 0) at = 0;
+  ins.steps.forEach((s, i) => {
+    const li = el('li', { html: s });
+    if (i === at) li.append(copyBox(ins.text));
+    steps.append(li);
+  });
+  box.append(el('b', {}, 'Publish your ' + ins.label + ' proof'), steps);
+  if (ins.needs_locator) {
+    const inp = el('input', { type: 'url', placeholder: ins.locator_hint });
+    const save = el('button', { class: 'btn primary small', type: 'button' }, 'Save address');
+    save.addEventListener('click', () => busy(save, async () => {
+      await api('locator', { seq: ins.seq, url: inp.value.trim() });
+      toast('Saved.');
+      onSaved && onSaved();
+    }));
+    box.append(el('div', { class: 'row wrapline' }, el('div', { class: 'grow' }, inp), save));
+  }
+  return box;
+}
+
+function renderProofs(root) {
+  // Add a proof
+  const sel = el('select', {}, S.services.map(s => el('option', { value: s.id }, s.label + (s.auto ? '' : ' (witnessed)'))));
+  const handle = el('input', { type: 'text', placeholder: S.services[0].hint });
+  sel.addEventListener('change', () => { handle.placeholder = S.services.find(s => s.id === sel.value).hint; });
+  const add = el('button', { class: 'btn primary', type: 'button' }, 'Add proof');
+  const result = el('div');
+  add.addEventListener('click', () => busy(add, async () => {
+    const r = await signStatement({ type: 'proof', service: sel.value, handle: handle.value }, 'Sign your claim',
+      'You claim this account. Next you’ll publish the proof text on it, so anyone can see the account agrees.');
+    if (!r) return;
+    handle.value = '';
+    render();
+    const target = document.querySelector('.proof[data-seq="' + r.seq + '"]');
+    if (target) target.querySelector('.grow').append(instructionsBox(r.proof, () => render()));
+  }));
+  root.append(el('div', { class: 'card' },
+    el('h2', {}, 'Add a proof'),
+    el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', {}, 'Service'), sel), el('div', { class: 'field' }, el('label', {}, 'Account'), handle)),
+    el('div', { class: 'mt' }, add), result));
+
+  // List
+  const list = el('ul', { class: 'proofs' });
+  if (!S.proofs.length) list.append(el('li', { class: 'muted small' }, 'No proofs yet. Start with your website or a domain.'));
+  for (const p of S.proofs) {
+    const g = el('div', { class: 'grow' });
+    const recheck = el('button', { class: 'btn small', type: 'button' }, 'Check now');
+    recheck.addEventListener('click', () => busy(recheck, async () => { await api('recheck', { seq: p.seq }); render(); toast('Checked.'); }));
+    const how = el('button', { class: 'btn small', type: 'button' }, p.needs_locator && !p.locator ? 'Finish this proof' : 'Instructions');
+    how.addEventListener('click', () => busy(how, async () => {
+      const r = await api('instructions', { seq: p.seq });
+      g.querySelectorAll('.notice').forEach(n => n.remove());
+      g.append(instructionsBox(r.proof, () => render()));
+    }));
+    const revoke = el('button', { class: 'btn small danger', type: 'button' }, 'Revoke');
+    revoke.addEventListener('click', () => busy(revoke, async () => {
+      const r = await signStatement({ type: 'revoke', seqs: [p.seq] }, 'Revoke this proof', 'Withdraw your claim to ' + p.label + ' ' + p.handle + '. The history stays in your chain, marked as revoked.');
+      if (r) { render(); toast('Revoked.'); }
+    }));
+    g.append(
+      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, p.profile ? el('a', { href: p.profile, target: '_blank', rel: 'noopener' }, p.handle) : p.handle),
+        el('span', { class: 'small muted' }, p.label), badge(p.status, p.detail)),
+      el('div', { class: 'meta' }, p.detail, p.checked ? ' · checked ' + ago(p.checked) : '',
+        p.locator ? [' · ', el('a', { href: p.locator, target: '_blank', rel: 'noopener' }, 'proof post')] : '',
+        p.witnesses.length ? ' · witnessed by ' + p.witnesses.length : ''),
+      el('div', { class: 'actions' }, p.auto ? recheck : null, how, revoke));
+    list.append(el('li', { class: 'proof', 'data-seq': p.seq }, svc(p.service), g));
+  }
+  const all = el('button', { class: 'btn small', type: 'button' }, 'Re-check all');
+  all.addEventListener('click', () => busy(all, async () => { await api('recheck', {}); render(); }));
+  root.append(el('div', { class: 'card' }, el('div', { class: 'row between' }, el('h2', {}, 'Your proofs'), S.proofs.length ? all : null), list));
+}
+
+/* ------------------------------------------------------------------ *
+ * Vouch tab
+ * ------------------------------------------------------------------ */
+function renderVouch(root) {
+  const inp = el('input', { type: 'text', placeholder: 'id.example.com', value: peerReport ? peerReport.url : '' });
+  const go = el('button', { class: 'btn primary', type: 'button' }, 'Check');
+  const out = el('div');
+  const run = () => busy(go, async () => {
+    out.replaceChildren(el('p', { class: 'muted mt' }, 'Fetching and verifying — this re-checks every proof, so it can take a little while…'));
+    const r = await api('peer', { url: inp.value.trim() });
+    peerReport = r.report;
+    drawReport(out, r.report);
+  });
+  go.addEventListener('click', run);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+  root.append(el('div', { class: 'card' },
+    el('h2', {}, 'Check and vouch for another Seal ID'),
+    el('p', { class: 'small muted' }, 'Your server fetches their signed chain, verifies every signature and re-checks every proof itself. Then you choose what to vouch for.'),
+    el('div', { class: 'row wrapline' }, el('div', { class: 'grow' }, inp), go), out));
+  if (peerReport) drawReport(out, peerReport);
+
+  // Given
+  const gl = el('ul', { class: 'vlist' });
+  if (!S.given.length) gl.append(el('li', { class: 'muted small' }, 'None yet.'));
+  for (const v of S.given) {
+    const resend = el('button', { class: 'btn small', type: 'button' }, 'Notify again');
+    resend.addEventListener('click', () => busy(resend, async () => { const r = await api('notify', { seq: v.seq }); render(); toast(r.notify.detail, !r.notify.ok); }));
+    const rev = el('button', { class: 'btn small danger', type: 'button' }, 'Withdraw');
+    rev.addEventListener('click', () => busy(rev, async () => {
+      const r = await signStatement({ type: 'revoke', seqs: [v.seq] }, 'Withdraw this vouch', 'You no longer vouch for ' + v.target + '.');
+      if (r) { render(); toast('Withdrawn. They will notice on their next refresh.'); }
+    }));
+    gl.append(el('li', {},
+      el('a', { href: v.target, target: '_blank', rel: 'noopener' }, v.target),
+      el('div', { class: 'tiny muted' }, ago(v.ts) + ' · ' + v.proofs.length + ' proofs · key …' + v.target_fp.slice(-16)),
+      v.notify ? el('div', { class: 'tiny ' + (v.notify.ok ? 'muted' : 'faint') }, v.notify.detail) : null,
+      el('div', { class: 'actions row wrapline mt' }, v.notify && v.notify.ok ? null : resend, rev)));
+  }
+
+  // Received
+  const rl = el('ul', { class: 'vlist' });
+  if (!S.received.length) rl.append(el('li', { class: 'muted small' }, 'None yet.'));
+  for (const v of S.received) {
+    rl.append(el('li', {}, el('a', { href: v.url, target: '_blank', rel: 'noopener' }, v.name || v.url),
+      el('div', { class: 'tiny muted' }, v.url + ' · ' + ago(v.ts) + ' · ' + v.proofs.map(p => p.service + (p.how === 'witnessed' ? ' (witnessed)' : '')).join(', '))));
+  }
+  const imp = el('input', { type: 'text', placeholder: 'Their Seal ID address' });
+  const impBtn = el('button', { class: 'btn small', type: 'button' }, 'Import');
+  impBtn.addEventListener('click', () => busy(impBtn, async () => { await api('import_vouch', { url: imp.value.trim() }); render(); toast('Imported.'); }));
+  root.append(el('div', { class: 'grid2 section' },
+    el('div', { class: 'card' }, el('h2', {}, 'You vouched for'), gl),
+    el('div', { class: 'card' }, el('h2', {}, 'Vouched for you'), rl,
+      el('div', { class: 'small muted mt' }, 'Someone vouched but it isn’t listed (their notification was blocked)? Import it:'),
+      el('div', { class: 'row wrapline mt' }, el('div', { class: 'grow' }, imp), impBtn))));
+}
+
+function drawReport(out, r) {
+  out.replaceChildren();
+  const box = el('div', { class: 'stack mt-lg' });
+  out.append(box);
+  if (!r.ok) {
+    box.append(el('div', { class: 'notice bad' }, r.error),
+      r.attempts && r.attempts.length ? el('ul', { class: 'small muted' }, r.attempts.map(a => el('li', {}, a.source + ' — ' + a.result))) : null);
+    return;
+  }
+  if (r.pin === 'changed') {
+    const acc = el('button', { class: 'btn small danger', type: 'button' }, 'Forget what I saw before');
+    acc.addEventListener('click', () => busy(acc, async () => { await api('peer_accept', { url: r.url }); toast('Forgotten. Check again.'); }));
+    box.append(el('div', { class: 'notice bad stack' },
+      el('b', {}, 'Warning: this identity changed in a way that does not extend what you saw before.'),
+      el('div', {}, 'Before: key ' + fpGroups(r.pinned.fp) + ' with ' + r.pinned.seq + ' statements. Now: key ' + fpGroups(r.fp) + ' with ' + r.seq + '. This happens when someone resets a lost key — or when someone else took over the address. Confirm with the person another way before trusting it.'),
+      acc));
+  }
+  r.warnings.forEach(w => box.append(el('div', { class: 'notice warn' }, w)));
+  box.append(el('div', { class: 'peer-head' },
+    el('div', { class: 'avatar' }, (r.name || '?').slice(0, 1).toUpperCase()),
+    el('div', {}, el('h3', { class: 'mb0' }, r.name || r.url), el('div', { class: 'idurl' }, r.url),
+      el('div', { class: 'fp' }, fpGroups(r.fp) + ' · ' + r.algo),
+      el('div', { class: 'tiny muted' }, r.seq + ' signed statements · ' + (r.pin === 'match' ? 'same identity as before' : r.pin === 'new' ? 'first time seen' : r.pin) + (r.dns && r.dns.fp === r.fp ? ' · key confirmed by DNS' : '')))));
+  if (r.bio) box.append(el('p', { class: 'small muted' }, r.bio));
+
+  const choices = {};
+  const list = el('ul', { class: 'proofs' });
+  if (!r.proofs.length) list.append(el('li', { class: 'muted small' }, 'This Seal ID has no proofs.'));
+  for (const p of r.proofs) {
+    const auto = el('input', { type: 'checkbox' });
+    const wit = el('input', { type: 'checkbox' });
+    const canAuto = p.status === 'verified';
+    auto.checked = canAuto;
+    auto.disabled = !canAuto;
+    const sync = () => { choices[p.seq] = auto.checked ? 'auto' : (wit.checked ? 'witnessed' : null); };
+    auto.addEventListener('change', () => { if (auto.checked) wit.checked = false; sync(); });
+    wit.addEventListener('change', () => { if (wit.checked) auto.checked = false; sync(); });
+    sync();
+    const witnessText = 'Verifying my Seal ID ' + r.url + ' ' + p.token;
+    list.append(el('li', { class: 'proof' }, svc(p.service), el('div', { class: 'grow' },
+      el('div', { class: 'row wrapline gap-sm' }, el('span', { class: 'who' }, p.profile ? el('a', { href: p.profile, target: '_blank', rel: 'noopener' }, p.handle) : p.handle),
+        el('span', { class: 'small muted' }, p.label), badge(p.status, p.detail)),
+      el('div', { class: 'meta' }, p.detail, p.locator ? [' · ', el('a', { href: p.locator, target: '_blank', rel: 'noopener' }, 'open the proof post')] : ''),
+      el('label', { class: 'check mt' }, auto, el('span', {}, canAuto ? 'Vouch: my server verified this' : 'My server could not verify this automatically')),
+      el('label', { class: 'check' }, wit, el('span', {}, 'I witnessed it myself: I opened the account/post and saw ',
+        el('code', {}, p.service === 'dns' ? p.token : witnessText), ' published by ', el('b', {}, p.handle))))));
+  }
+  const vouch = el('button', { class: 'btn primary', type: 'button' }, 'Sign my vouch for ' + (r.name || r.url));
+  vouch.disabled = r.pin === 'changed';
+  vouch.addEventListener('click', () => busy(vouch, async () => {
+    const res = await signStatement({ type: 'vouch', target: r.url, proofs: choices }, 'Vouch for ' + (r.name || r.url),
+      'Your signed statement says you checked ' + r.url + ' (key ' + fpGroups(r.fp).slice(-19) + ') and confirms the proofs you ticked.');
+    if (!res) return;
+    toast(res.notify ? res.notify.detail : 'Vouched.', res.notify && !res.notify.ok);
+    peerReport = null;
+    render();
+  }));
+  box.append(el('div', { class: 'card' }, list), el('div', {}, vouch));
+}
+
+/* ------------------------------------------------------------------ *
+ * Profile tab
+ * ------------------------------------------------------------------ */
+function renderProfile(root) {
+  const name = el('input', { type: 'text', value: S.identity.name, maxlength: 80 });
+  const bio = el('textarea', { maxlength: 500 });
+  bio.value = S.identity.bio;
+  const save = el('button', { class: 'btn primary', type: 'button' }, 'Sign and save');
+  save.addEventListener('click', () => busy(save, async () => {
+    const r = await signStatement({ type: 'profile', name: name.value, bio: bio.value }, 'Update your profile');
+    if (r) { render(); toast('Saved.'); }
+  }));
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Profile'),
+    el('div', { class: 'field' }, el('label', {}, 'Display name'), name),
+    el('div', { class: 'field' }, el('label', {}, 'Bio'), bio), save));
+}
+
+/* ------------------------------------------------------------------ *
+ * Settings tab
+ * ------------------------------------------------------------------ */
+function renderSettings(root) {
+  const I = S.identity;
+
+  // Reachability
+  const reachOut = el('div');
+  const reach = el('button', { class: 'btn', type: 'button' }, 'Test now');
+  reach.addEventListener('click', () => busy(reach, async () => {
+    const r = await api('reach', { helper: S.reach_helper });
+    const res = r.result;
+    reachOut.replaceChildren(res.ok
+      ? el('div', { class: 'notice ok mt' }, (r.self ? 'This server' : r.helper) + ' fetched and verified your Seal ID' + (res.mirror ? ' (from a mirror)' : '') + '.')
+      : el('div', { class: 'notice bad mt stack' }, el('div', {}, (r.self ? 'This server' : r.helper) + ' could NOT reach your Seal ID: ' + (res.error || 'unknown error')),
+        res.blocked ? el('div', {}, 'Your host’s security system is blocking automated requests. Add a mirror below (e.g. a GitHub repository or GitHub Pages) so others can still verify you.') : null,
+        el('ul', { class: 'small' }, (res.attempts || []).map(a => el('li', {}, a.source + ' — ' + a.result)))));
+  }));
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Can other Seal IDs reach you?'),
+    el('p', { class: 'small muted' }, 'Asks ' + S.reach_helper + ' to fetch and verify your Seal ID from the outside, the way any other installation would.'),
+    reach, reachOut));
+
+  // DNS
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'DNS key record (recommended)'),
+    el('p', { class: 'small muted' }, 'A TXT record lets anyone confirm your key even if your web host blocks automated requests, and stops anyone from swapping your key unnoticed.'),
+    el('dl', { class: 'kv' }, el('dt', {}, 'Name'), el('dd', { class: 'mono' }, S.dns.name), el('dt', {}, 'Type'), el('dd', {}, 'TXT')),
+    copyBox(S.dns.value),
+    el('div', { class: 'notice ' + (S.dns.ok ? 'ok' : 'warn') }, S.dns.ok ? 'Found and matches your key.' : (S.dns.current ? 'Found, but it does not match: ' + S.dns.current : 'Not found yet.'))));
+
+  // Mirrors
+  const mta = el('textarea', { placeholder: 'https://raw.githubusercontent.com/you/seal-id/main/seal-id.json' });
+  mta.value = S.mirrors.join('\n');
+  const msave = el('button', { class: 'btn primary', type: 'button' }, 'Sign mirror list');
+  msave.addEventListener('click', () => busy(msave, async () => {
+    const r = await signStatement({ type: 'mirrors', urls: mta.value.split(/\s+/).filter(Boolean) }, 'Update your mirrors');
+    if (r) { render(); toast('Saved. Update your DNS record too.'); }
+  }));
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Mirrors'),
+    el('p', { class: 'small muted' }, 'Copies of your bundle somewhere else, used when your own site can’t be reached. Copies can’t be forged — everything in them is signed — but they must be refreshed by hand when your identity changes.'),
+    el('div', { class: 'row wrapline' }, el('a', { class: 'btn small', href: '.well-known/seal-id.json', download: 'seal-id.json' }, 'Download bundle (seal-id.json)'),
+      S.bundle_ok ? null : el('span', { class: 'small faint' }, 'Static file missing — check folder permissions.')),
+    el('div', { class: 'field' }, el('label', {}, 'Mirror addresses (one per line)'), mta), msave));
+
+  // Key
+  const kta = el('textarea', { placeholder: '-----BEGIN PGP PUBLIC KEY BLOCK-----' });
+  const ksave = el('button', { class: 'btn', type: 'button' }, 'Replace stored public key');
+  ksave.addEventListener('click', () => busy(ksave, async () => { await api('update_key', { key: kta.value }); render(); toast('Key updated.'); }));
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Your key'),
+    el('dl', { class: 'kv' }, el('dt', {}, 'Fingerprint'), el('dd', { class: 'mono' }, fpGroups(I.fp)), el('dt', {}, 'Algorithm'), el('dd', {}, I.algo),
+      I.reset_from ? [el('dt', {}, 'Replaced key'), el('dd', { class: 'mono' }, fpGroups(I.reset_from))] : null),
+    el('p', { class: 'small muted' }, 'After adding a subkey or extending the expiry date, paste the updated PUBLIC key here (same fingerprint).'),
+    kta, ksave));
+
+  // Password
+  const pw = el('input', { type: 'password', autocomplete: 'new-password', placeholder: S.has_password ? 'New password (empty = remove)' : 'At least 10 characters' });
+  const psave = el('button', { class: 'btn', type: 'button' }, S.has_password ? 'Change / remove password' : 'Set password');
+  psave.addEventListener('click', () => busy(psave, async () => { await api('password', { password: pw.value }); pw.value = ''; render(); toast('Saved.'); }));
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Fallback password'),
+    el('p', { class: 'small muted' }, S.has_password ? 'A fallback password is set.' : 'No password: you sign in with your key only.'),
+    pw, psave));
+
+  // Pins
+  root.append(el('div', { class: 'card stack' }, el('h2', {}, 'Seal IDs you have seen'),
+    S.pins.length ? el('ul', { class: 'vlist' }, S.pins.map(p => el('li', {}, el('a', { href: p.url, target: '_blank', rel: 'noopener' }, p.name || p.url),
+      el('div', { class: 'tiny muted' }, p.url + ' · key …' + p.fp.slice(-16) + ' · ' + ago(p.last_seen))))) : el('p', { class: 'small muted' }, 'None yet.')));
+}
+
+/* ------------------------------------------------------------------ */
+if (D.broken) app.replaceChildren(el('div', { class: 'notice bad' }, 'Your chain failed verification: ' + D.broken));
+else if (!D.admin) renderLogin();
+else load().catch(e => app.replaceChildren(el('div', { class: 'notice bad' }, e.message)));
