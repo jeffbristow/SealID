@@ -148,14 +148,14 @@ link)). It ties the post to that exact signed claim.
 | `hackernews`| `username`        | the "about" field of the profile | HN Firebase API |
 | `reddit`    | `username`        | a post (locator = post URL) | the post's `.json`: author + text |
 | `youtube`   | `@handle`         | the channel description | channel page |
-| `facebook`  | profile name/URL  | a public post (locator = post URL) | **witnessed** only (see below) |
+| `facebook`  | profile name/URL  | a Public post (locator = post or share URL) | the post page's og:url (author) + og:description (text); 1.2.4 — before: witnessed only |
 
 Status of a proof as seen by a verifier:
 
 * `verified` — fetched, author matches, token present.
 * `failed` — fetched, but the author is wrong or the token is missing.
 * `unreachable` — the service could not be reached or blocked us (not the owner's fault; retried later).
-* `witnessed` — no automatic check; N other Seal IDs vouched with `how: witnessed`.
+* `witnessed` — not verified automatically (no automatic check, or the service hides the post from servers right now), but N other Seal IDs vouched with `how: witnessed`.
 * `pending` — needs a locator that hasn't been given yet.
 * `revoked` — withdrawn by a `revoke` link.
 

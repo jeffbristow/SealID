@@ -46,7 +46,7 @@ The full protocol is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 | Hacker News | your profile's "about" |
 | Reddit | a post |
 | YouTube | your channel description |
-| Facebook | **witnessed**: servers can't read Facebook, so other Seal ID owners look at your post and vouch for it |
+| Facebook | a **Public** post (read like a link preview: author + text); if Facebook hides it from servers, other Seal ID owners can still witness it |
 
 ## Install
 

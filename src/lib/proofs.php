@@ -138,6 +138,7 @@ function own_proofs(): array
         $w = $wit[$seq]['witnessed'] ?? [];
         $status = $c['status'] ?? ($cls && !$cls::AUTO ? 'pending' : 'pending');
         if ($cls && !$cls::AUTO) $status = $w ? 'witnessed' : 'pending';
+        elseif ($w && $status !== 'verified') $status = 'witnessed';      // 1.2.4: people saw it, even if servers can't right now
         $out[] = $p + [
             'label' => $cls ? $cls::LABEL : $p['service'],
             'profile' => $cls ? $cls::profileUrl($p['handle']) : null,
