@@ -1,5 +1,5 @@
 // Seal ID — admin page.
-import { signer, el, toast, copyBox, keyForm, signDialog, fpGroups, setSavedKeyProvider, savedKeyButtons } from './sign.js';
+import { signer, el, toast, copyBox, keyForm, signDialog, fpGroups, setSavedKeyProvider, savedKeyButtons, checkPassphrase, keyFileStem, download } from './sign.js';
 import { deviceKey, serverCopy, passkeySupported } from './keystore.js';
 
 const D = JSON.parse(document.getElementById('sealid-data').textContent);
@@ -664,9 +664,38 @@ function keyStorageCard() {
   return box;
 }
 
+/** 1.4.0: download the public key, and an encrypted (passphrase-locked) copy of the private key. */
+function keyBackupCard() {
+  const I = S.identity;
+  const stem = keyFileStem(I.name, I.fp);
+  const pub = el('a', { class: 'btn', href: 'api.php?a=key', download: stem + '-public.asc' }, 'Download public key');
+  const p1 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Passphrase for the file (10+ characters)' });
+  const p2 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Same passphrase again' });
+  const save = el('button', { class: 'btn primary', type: 'button' }, 'Download private key (encrypted)');
+  save.addEventListener('click', () => busy(save, async () => {
+    checkPassphrase(p1.value, p2.value);
+    if (!signer.loaded()) {
+      unlockModal();
+      toast('Unlock your key first (this once), then press Download again.');
+      return;
+    }
+    const armored = await signer.exportLocked(p1.value);
+    p1.value = p2.value = '';
+    download(stem + '-private.asc', armored, 'application/pgp-keys');
+    toast('Downloaded. Keep it somewhere safe, off this computer too.');
+  }));
+  return el('div', { class: 'card stack', id: 'keybackup' }, el('h2', {}, 'Back up your key'),
+    el('p', { class: 'small muted' }, 'Your private key is never stored on this server in a readable form. Keep your own copy: the file below is locked with the passphrase you choose here, in standard OpenPGP format, so Seal Post, Seal Chat, Kleopatra and GnuPG can import it.'),
+    el('div', { class: 'row wrapline' }, pub, el('span', { class: 'tiny muted mono' }, fpGroups(I.fp))),
+    el('h3', { class: 'mt' }, 'Private key'),
+    el('div', { class: 'grid2' }, p1, p2),
+    el('div', { class: 'row wrapline' }, save,
+      el('span', { class: 'tiny muted' }, signer.loaded() ? 'Uses the key unlocked in this tab.' : 'Asks for your key first (file, saved key or passkey).')));
+}
+
 function renderSettings(root) {
   const I = S.identity;
-  root.append(updatesCard(), keyStorageCard());
+  root.append(updatesCard(), keyBackupCard(), keyStorageCard());
 
   // Reachability
   const reachOut = el('div');

@@ -39,7 +39,42 @@ export const signer = {
     const message = await openpgp.createMessage({ binary: new TextEncoder().encode(payload) });
     return openpgp.sign({ message, signingKeys: key, detached: true });
   },
+  /** 1.4.0: the loaded key, armored and LOCKED with $passphrase (a backup file). The unlocked key stays as it is. */
+  async exportLocked(passphrase) {
+    if (!key) throw new Error('No key loaded.');
+    checkPassphrase(passphrase);
+    return (await openpgp.encryptKey({ privateKey: key, passphrase })).armor();
+  },
 };
+
+/** 1.4.0: rules for a passphrase that protects a private key file. */
+export function checkPassphrase(p, again) {
+  if (!p || p.length < 10) throw new Error('Use a passphrase of at least 10 characters. It protects your key file if anyone ever gets a copy.');
+  if (again !== undefined && p !== again) throw new Error('The two passphrases are different.');
+}
+
+/**
+ * 1.4.0: make a new OpenPGP key IN THIS BROWSER. Nothing is sent anywhere.
+ * type: 'ecc' (Ed25519 + Curve25519, recommended) or 'rsa' (RSA-4096).
+ * Returns the armored private key (locked with the passphrase), public key and
+ * revocation certificate, plus the fingerprint.
+ */
+export async function generateKey({ name, email, type, passphrase }) {
+  checkPassphrase(passphrase);
+  const uid = { name: (name || '').trim() || 'Seal ID' };
+  if ((email || '').trim()) uid.email = email.trim();
+  const opts = { userIDs: [uid], passphrase, format: 'armored' };
+  Object.assign(opts, type === 'rsa' ? { type: 'rsa', rsaBits: 4096 } : { type: 'ecc' });
+  const g = await openpgp.generateKey(opts);
+  const k = await openpgp.readPrivateKey({ armoredKey: g.privateKey });
+  return { privateKey: g.privateKey, publicKey: g.publicKey, revocation: g.revocationCertificate, fp: k.getFingerprint().toUpperCase() };
+}
+
+/** "alex-rivera-1A98C3E052B7D44F" — a file name stem for key files. */
+export function keyFileStem(name, fp) {
+  const slug = (name || 'sealid').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'sealid';
+  return slug + '-' + (fp || '').slice(-16);
+}
 
 /* ------------------------------------------------------------------ *
  * Small DOM helpers (shared with admin.js / setup.js)
@@ -78,8 +113,8 @@ export function fpGroups(fp) {
   return (fp || '').replace(/(.{4})/g, '$1 ').trim();
 }
 
-function download(name, text) {
-  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type: 'text/plain' })), download: name });
+export function download(name, text, type = 'text/plain') {
+  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
   document.body.append(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

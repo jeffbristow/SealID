@@ -1,5 +1,5 @@
 // Seal ID — first-run setup.
-import { signer, el, toast, keyForm, signDialog, fpGroups } from './sign.js';
+import { signer, el, toast, keyForm, signDialog, fpGroups, generateKey, checkPassphrase, keyFileStem, download } from './sign.js';
 
 const D = JSON.parse(document.getElementById('sealid-data').textContent);
 const app = document.getElementById('app');
@@ -90,37 +90,136 @@ function stepIdentity() {
   check();
 }
 
-function stepKey() {
+/** Sends the public key (only the public key) to the server and moves on to signing. */
+async function prepare(err) {
+  err.classList.add('hidden');
+  try {
+    const r = await post('prepare', { url: state.url, name: state.name, bio: state.bio, key: state.publicKey });
+    stepSign(r);
+  } catch (e) { showErr(err, e); }
+}
+
+function stepKey(start = 'private') {
   const err = errBox();
   const holder = el('div');
+  const MODES = ['private', 'public', 'new'];
   const mode = m => {
     holder.replaceChildren();
-    seg.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String((i === 0) === (m === 'private'))));
+    err.classList.add('hidden');
+    seg.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(MODES[i] === m)));
     if (m === 'private') {
-      holder.append(keyForm({ onLoaded: () => { state.publicKey = signer.publicArmored(); prepare(); } }));
-    } else {
+      holder.append(keyForm({ onLoaded: () => { state.publicKey = signer.publicArmored(); prepare(err); } }));
+    } else if (m === 'public') {
       const ta = el('textarea', { placeholder: '-----BEGIN PGP PUBLIC KEY BLOCK-----', spellcheck: 'false' });
       const go = el('button', { class: 'btn primary', type: 'button' }, 'Use this public key');
-      go.addEventListener('click', () => { state.publicKey = ta.value.trim(); prepare(); });
+      go.addEventListener('click', () => { state.publicKey = ta.value.trim(); prepare(err); });
       holder.append(el('p', { class: 'small muted' }, 'Paste your PUBLIC key. You will then sign one statement with your PGP app (gpg, Seal Post, …) and paste the signature.'), ta, go);
+    } else {
+      holder.append(newKeyForm(err));
     }
   };
   const seg = el('div', { class: 'seg', role: 'group' },
     el('button', { type: 'button', onclick: () => mode('private') }, 'Unlock my key here'),
-    el('button', { type: 'button', onclick: () => mode('public') }, 'Paste my public key'));
-
-  async function prepare() {
-    err.classList.add('hidden');
-    try {
-      const r = await post('prepare', { url: state.url, name: state.name, bio: state.bio, key: state.publicKey });
-      stepSign(r);
-    } catch (e) { showErr(err, e); }
-  }
+    el('button', { type: 'button', onclick: () => mode('public') }, 'Paste my public key'),
+    el('button', { type: 'button', onclick: () => mode('new') }, 'Create a new key'));
 
   app.replaceChildren(card('Your OpenPGP key',
-    el('p', { class: 'muted' }, 'Seal ID is anchored on your OpenPGP key — the same kind of key Seal Post and Seal Chat use. Ed25519 and RSA keys work.'),
+    el('p', { class: 'muted' }, 'Seal ID is anchored on your OpenPGP key — the same kind of key Seal Post and Seal Chat use. Ed25519 and RSA keys work. No key yet? Choose “Create a new key”.'),
     seg, holder, err));
-  mode('private');
+  mode(start);
+}
+
+/* ------------------------------------------------------------------ *
+ * 1.4.0: create a key in this browser
+ * ------------------------------------------------------------------ */
+function newKeyForm(err) {
+  const name = el('input', { type: 'text', value: state.name, maxlength: 80, autocomplete: 'name' });
+  const email = el('input', { type: 'email', placeholder: 'Optional, e.g. you@example.com', autocomplete: 'email' });
+  const type = el('select', {},
+    el('option', { value: 'ecc' }, 'Ed25519 (recommended: modern, small and fast)'),
+    el('option', { value: 'rsa' }, 'RSA 4096 (for older PGP software)'));
+  const p1 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'At least 10 characters' });
+  const p2 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Same passphrase again' });
+  const go = el('button', { class: 'btn primary', type: 'button' }, 'Create my key');
+  go.addEventListener('click', async () => {
+    err.classList.add('hidden');
+    try {
+      checkPassphrase(p1.value, p2.value);
+      if (email.value.trim() && !email.checkValidity()) throw new Error('That email address doesn’t look right (or leave it empty).');
+      go.disabled = true;
+      go.textContent = 'Creating…';
+      const gen = await generateKey({ name: name.value || state.name, email: email.value, type: type.value, passphrase: p1.value });
+      gen.name = name.value.trim() || state.name;
+      gen.passphrase = p1.value;
+      p1.value = p2.value = '';
+      stepSaveKeys(gen);
+    } catch (e) {
+      showErr(err, e);
+      go.disabled = false;
+      go.textContent = 'Create my key';
+    }
+  });
+  return el('div', { class: 'stack' },
+    el('p', { class: 'small muted' }, 'Your new key is made right here, in this browser. It is never sent to the server: next you download it, and only the public half is published.'),
+    el('div', { class: 'grid2' },
+      el('div', { class: 'field' }, el('label', {}, 'Name on the key'), name),
+      el('div', { class: 'field' }, el('label', {}, 'Email on the key'), email)),
+    el('div', { class: 'field' }, el('label', {}, 'Type'), type),
+    el('div', { class: 'field' }, el('label', {}, 'Passphrase for the key'), el('div', { class: 'grid2' }, p1, p2),
+      el('div', { class: 'tiny muted mt' }, 'It locks your private key file. Nobody can recover it for you — not Seal ID, not your web host — so write it down somewhere safe.')),
+    go);
+}
+
+/** Download the new key files; setup continues only once the private key is saved. */
+function stepSaveKeys(gen) {
+  const err = errBox();
+  const stem = keyFileStem(gen.name, gen.fp);
+  let savedPrivate = false;
+  const ok = el('input', { type: 'checkbox' });
+  const go = el('button', { class: 'btn primary', type: 'button' }, 'Continue');
+  const sync = () => {
+    go.disabled = !(savedPrivate && ok.checked);
+    hint.textContent = !savedPrivate ? 'Download your private key first.' : !ok.checked ? 'Tick the box to confirm.' : '';
+  };
+  const hint = el('span', { class: 'small muted' });
+  const file = (label, what, name, text, primary, mark) => {
+    const b = el('button', { class: 'btn' + (primary ? ' primary' : ''), type: 'button' }, label);
+    const done = el('span', { class: 'small muted' });
+    b.addEventListener('click', () => {
+      download(name, text, 'application/pgp-keys');
+      done.textContent = '✓ ' + name;
+      if (mark) { savedPrivate = true; sync(); }
+    });
+    return el('div', { class: 'keyfile' }, el('div', {}, el('b', {}, what.title), el('div', { class: 'tiny muted' }, what.text)), el('div', { class: 'row wrapline' }, b, done));
+  };
+  go.addEventListener('click', async () => {
+    err.classList.add('hidden');
+    go.disabled = true;
+    try {
+      await signer.load(gen.privateKey, gen.passphrase);   // unlocked in this tab only, to sign the first statement
+      gen.passphrase = '';
+      state.publicKey = gen.publicKey;
+      state.generated = { fp: gen.fp, stem };
+      await prepare(err);
+    } catch (e) { showErr(err, e); }
+    sync();
+  });
+  ok.addEventListener('change', sync);
+  app.replaceChildren(card('Save your new key',
+    el('div', { class: 'notice ok' }, 'Your key ', el('span', { class: 'mono' }, fpGroups(gen.fp)), ' was created in this browser.'),
+    el('p', { class: 'muted' }, 'These files exist only in this tab. Download them now: once you leave this page they are gone, and this server never receives your private key.'),
+    file('Download private key', { title: 'Private key (secret)', text: 'Locked with your passphrase. You need it — and the passphrase — to sign in and to change your Seal ID. Keep a copy off this computer (a USB stick, a password manager).' },
+      stem + '-private.asc', gen.privateKey, true, true),
+    file('Download public key', { title: 'Public key', text: 'Safe to share. Your Seal ID publishes it for you anyway.' },
+      stem + '-public.asc', gen.publicKey, false, false),
+    file('Download revocation certificate', { title: 'Revocation certificate', text: 'Keep it with the private key. If the key is ever stolen, publishing this tells PGP software to stop trusting it.' },
+      stem + '-revocation.asc', gen.revocation, false, false),
+    el('label', { class: 'check' }, ok, el('span', {}, 'I saved my private key in a safe place and I know its passphrase. I understand nobody can recover them for me.')),
+    err,
+    el('div', { class: 'row wrapline' }, go, hint),
+    el('p', { class: 'tiny muted' }, 'Tip: you can import the private key into Seal Post, Seal Chat, Kleopatra or GnuPG (gpg --import) to use the same key there.'),
+    el('button', { class: 'link small', type: 'button', onclick: () => { if (confirm('Throw this key away and go back?')) stepKey('new'); } }, 'Start over with a different key')));
+  sync();
 }
 
 function stepSign(r) {
@@ -159,6 +258,8 @@ function stepDone(r) {
     el('img', { src: 'assets/seal-id.svg', alt: '', width: 88, height: 88 }),
     el('p', {}, 'Your identity ', el('b', { class: 'mono' }, r.url), ' is published.'),
     r.bundle_error ? el('div', { class: 'notice warn' }, 'Could not write .well-known/seal-id.json (' + r.bundle_error + '). Other Seal IDs will use api.php instead — fix the folder permissions when you can.') : null,
+    state.generated ? el('div', { class: 'notice warn' }, 'This page forgets your key as soon as you leave it. Whenever Seal ID asks for your key, load the file ',
+      el('span', { class: 'mono' }, state.generated.stem + '-private.asc'), ' and enter its passphrase. To sign with one tap instead, open Admin → Settings → Saved signing key.') : null,
     el('p', { class: 'muted' }, 'Next: add proofs for your website and accounts, and vouch for people you know.'),
     el('div', { class: 'row wrapline' },
       el('a', { class: 'btn primary', href: 'admin.php' }, 'Open the admin page'),

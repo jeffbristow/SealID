@@ -57,7 +57,10 @@ Requirements: PHP 8.1+ with the `curl`, `sodium` and `openssl` extensions
    e.g. `id.example.com`.
 2. Copy `config.example.php` to `config.php` and set `setup_code` to a secret.
 3. Open `https://id.example.com/setup.php`, enter the setup code, choose your
-   name, load your OpenPGP key and sign your first statement.
+   name, load your OpenPGP key and sign your first statement. No key yet?
+   Choose **Create a new key**: it's made in your browser (Ed25519 or RSA-4096),
+   you download the private key (locked with your passphrase), the public key
+   and a revocation certificate, and only the public key is sent to the server.
 4. In the admin page (`/admin.php`), add proofs and follow the instructions.
 5. Recommended: add the DNS record shown under **Settings**, and press
    **Test now** to check that other Seal IDs can reach you.
@@ -93,6 +96,13 @@ Seal ID has a working proof for that domain (also `&service=github&handle=…`):
 ```
 
 Use it to show a "Verified by Seal ID" badge on your site (cache it for an hour).
+
+### Back up your key (1.4.0)
+
+**Admin → Settings → Back up your key** downloads your public key and, from the
+key unlocked in your browser, a private key file locked with a passphrase you
+choose (standard OpenPGP: GnuPG, Kleopatra, Seal Post and Seal Chat import it).
+The server never receives the key in a readable form.
 
 ### Saved signing key (1.2.0, optional)
 
