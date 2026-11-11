@@ -43,7 +43,11 @@ const zip = readFileSync(zipPath);
 const sha = createHash('sha256').update(zip).digest('hex');
 const text = `sealid-update-v1|${ver}|${sha}`;
 const sig = sign(null, Buffer.from(text), priv).toString('base64');
-writeFileSync(zipPath + '.sig', JSON.stringify({ version: ver, sha256: sha, sig }, null, 1) + '\n');
+// Release notes travel in the .sig file too (not signed; shown by installs that can't use
+// the GitHub API): the "- " bullets of dist/notes-<version>.md, if it exists.
+const notesFile = join(root, 'dist', `notes-${ver}.md`);
+const notes = existsSync(notesFile) ? readFileSync(notesFile, 'utf8').split(/\r?\n/).filter(l => /^\s*[-*]\s+/.test(l)).map(l => l.replace(/^\s*[-*]\s+/, '').trim()).slice(0, 8) : [];
+writeFileSync(zipPath + '.sig', JSON.stringify({ version: ver, sha256: sha, sig, notes }, null, 1) + '\n');
 
 // Check against the public key the installs trust.
 const pubB64 = (readFileSync(join(root, 'src/lib/update.php'), 'utf8').match(/UPDATE_PUBKEY = '([^']+)'/) || [])[1];

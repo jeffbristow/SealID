@@ -85,5 +85,9 @@ https addresses: proofs, vouching, inbox, withdrawal, mirror fallback).
   and edge caches can keep a 404. Proof fetches and peer fetches therefore use a
   cache-buster query + `Cache-Control: no-cache`, and peers read `api.php?a=bundle`
   (generated per request) before the static `.well-known/seal-id.json`.
+- GitHub API: 60 anonymous requests/hour PER IP, and shared hosts share one IP — often used up by
+  neighbours (HTTP 403). The updater falls back to github.com/<repo>/releases/latest (a redirect to
+  the tag) + standard download URLs; notes come from the .sig file's "notes" (release.mjs fills it
+  from dist/notes-<v>.md).
 - Reddit blocks datacenter IPs on its JSON API; its oEmbed endpoint works, so the
   Reddit proof lives in the post title.

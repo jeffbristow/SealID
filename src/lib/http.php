@@ -100,6 +100,10 @@ function http_fetch(string $url, array $opt = []): array
 
         if ($tooBig) return ['status' => 0, 'body' => '', 'type' => '', 'url' => $url, 'error' => 'The answer was too large.'];
         if ($err !== null && $status === 0) return ['status' => 0, 'body' => '', 'type' => '', 'url' => $url, 'error' => 'No answer from ' . $host . ' (' . $err . ').'];
+        if ($status >= 300 && $status < 400 && !empty($headers['location']) && !empty($opt['no_follow'])) {
+            // The caller wants the redirect itself (e.g. GitHub's /releases/latest → /releases/tag/vX).
+            return ['status' => $status, 'body' => '', 'type' => '', 'url' => $url, 'location' => http_resolve_url($url, $headers['location']), 'error' => null];
+        }
         if ($status >= 300 && $status < 400 && !empty($headers['location'])) {
             $url = http_resolve_url($url, $headers['location']);
             if ($status === 303) { $method = 'GET'; unset($opt['body']); }

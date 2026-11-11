@@ -82,7 +82,12 @@ function up_ask(?string &$why = null): ?array
 {
     $r = http_json('https://api.github.com/repos/' . UPDATE_REPO . '/releases/latest', ['accept' => 'application/vnd.github+json', 'timeout' => 15]);
     if ($r['status'] !== 200 || !is_array($r['json'])) {
-        $why = $r['status'] ? 'GitHub answered HTTP ' . $r['status'] : (string)$r['error'];
+        // 1.2.1: shared hosting shares one IP with many sites, and GitHub's API allows only 60
+        // anonymous requests an hour per IP — often used up by the neighbours. The web
+        // address /releases/latest is not limited that way: it redirects to the newest tag.
+        $w = up_ask_web($why2);
+        if ($w) return $w;
+        $why = ($r['status'] ? 'GitHub answered HTTP ' . $r['status'] : (string)$r['error']) . ($why2 ? "; $why2" : '');
         return null;
     }
     $j = $r['json'];
@@ -107,6 +112,31 @@ function up_ask(?string &$why = null): ?array
     }
     return ['version' => $ver, 'zip' => $zip, 'sig' => $sig, 'size' => $size, 'notes' => $notes,
             'url' => (string)($j['html_url'] ?? ''), 'published' => (string)($j['published_at'] ?? '')];
+}
+
+/**
+ * The newest release without the GitHub API: follow github.com/<repo>/releases/latest to its
+ * tag, use the standard download addresses, and read the notes from the .sig file (1.2.1).
+ */
+function up_ask_web(?string &$why = null): ?array
+{
+    $r = http_fetch('https://github.com/' . UPDATE_REPO . '/releases/latest', ['no_follow' => true, 'accept' => 'text/html', 'timeout' => 15]);
+    if (!preg_match('#^https://github\.com/' . preg_quote(UPDATE_REPO, '#') . '/releases/tag/v?(\d+\.\d+\.\d+)$#', (string)($r['location'] ?? ''), $m)) {
+        $why = 'github.com did not name a release' . ($r['status'] ? ' (HTTP ' . $r['status'] . ')' : '');
+        return null;
+    }
+    $ver = $m[1];
+    $base = 'https://github.com/' . UPDATE_REPO . "/releases/download/v$ver/SealID-$ver.zip";
+    $s = http_fetch($base . '.sig', ['max_bytes' => 65536, 'timeout' => 20, 'redirects' => 5, 'accept' => 'application/octet-stream']);
+    $sig = $s['status'] === 200 ? json_decode($s['body'], true) : null;
+    if (!is_array($sig) || ($sig['version'] ?? '') !== $ver) {
+        $why = "release $ver has no signed package";
+        return null;
+    }
+    $notes = [];
+    foreach ((array)($sig['notes'] ?? []) as $n) if (is_string($n) && count($notes) < 8) $notes[] = mb_substr(strip_tags($n), 0, 200);
+    return ['version' => $ver, 'zip' => $base, 'sig' => $base . '.sig', 'size' => 0, 'notes' => $notes,
+            'url' => 'https://github.com/' . UPDATE_REPO . "/releases/tag/v$ver", 'published' => ''];
 }
 
 /** The newest known release: { checked, latest|null, error } — asked again after 12 h, or now with $force. */
