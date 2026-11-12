@@ -15,6 +15,10 @@ verifies every signature and re-checks every proof itself. When you've checked
 someone, you can **vouch** for them — a signed statement that shows up on both
 profiles.
 
+Anyone can check one, too: type a domain or Seal ID address into the
+**checker** on any Seal ID's profile page (`check.php`) to see whose Seal ID it
+is, or whether something is wrong with it (1.5.0).
+
 Part of the Seal family with [Seal Post](https://github.com/jeffbristow/sealpost)
 and Seal Chat. Your Seal ID uses the same kind of key, so it can later prove the
 Seal Chat ID you use is really yours.
@@ -96,6 +100,33 @@ Seal ID has a working proof for that domain (also `&service=github&handle=…`):
 ```
 
 Use it to show a "Verified by Seal ID" badge on your site (cache it for an hour).
+
+### Check a Seal ID (1.5.0)
+
+Every Seal ID has a public checker at `https://<your Seal ID>/check.php`, and a
+check box on its profile page. A visitor types a domain (`example.com`) or a
+Seal ID address; your server fetches it, verifies every signature, re-checks its
+proofs and answers in plain words:
+
+| verdict | meaning |
+|---------|---------|
+| **Valid Seal ID** | whose it is (name, picture, address, key) and which accounts and domains it proves. For a domain: it points to that Seal ID and the Seal ID confirms it |
+| **Not confirmed** | the domain points to a Seal ID that doesn't confirm it: possible impersonation |
+| **Invalid** | a Seal ID answered, but its signatures, key or DNS key record don't check out |
+| **Couldn't be checked** | the site blocked or didn't answer this server; not the same as fake |
+| **No Seal ID found** | nothing at that address, and the domain points to no Seal ID |
+
+Results can be shared as links (`check.php?q=example.com`). As JSON:
+`api.php?a=lookup&q=example.com` (CORS `*`).
+
+Limits: 10 checks a minute per visitor and 60 new checks every 10 minutes for
+the whole server; answers are kept for 10 minutes (failures for 2). Nothing is
+saved about the Seal IDs looked up. Turn the checker off in **Admin → Settings →
+Public checker** (or `'public_check' => false` in `config.php`).
+
+A valid result proves that one OpenPGP key controls the address and the
+verified accounts. It doesn't prove a legal name, and it's this server's
+answer: for a fully independent check, use your own Seal ID or Seal Chat.
 
 ### Back up your key (1.4.0)
 

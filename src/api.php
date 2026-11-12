@@ -6,6 +6,7 @@
  *   GET  ?a=status   proof statuses; re-checks a few stale proofs
  *   POST ?a=inbox    {from, seq}  "I vouched for you"
  *   POST ?a=reach    {url}        "can you reach this Seal ID?"
+ *   GET  ?a=lookup&q=example.com   1.5.0: public checker — whose Seal ID is this domain / address?
  */
 declare(strict_types=1);
 require __DIR__ . '/lib/bootstrap.php';
@@ -86,6 +87,13 @@ try {
             if ($from === null) fail(400, 'Missing or bad "from" address.');
             $r = vouch_import($from);
             json_out(['ok' => $r['ok'], 'error' => $r['error'] ?? null], $r['ok'] ? 200 : 422);
+
+        case 'lookup':
+            // 1.5.0: the public checker (check.php) as JSON. Rate limits and cache: lib/check.php
+            if (!is_installed()) fail(404, 'Not set up yet.');
+            if (!check_enabled()) json_out(['ok' => false, 'error' => 'The public checker is turned off on this Seal ID.'], 403, true);
+            $res = check_lookup((string)($_GET['q'] ?? ''));
+            json_out($res, $res['verdict'] === 'busy' ? 429 : 200, true);
 
         case 'claim':
             // 1.2.0 badge lookup: "does this Seal ID have a working proof for this domain/account?"

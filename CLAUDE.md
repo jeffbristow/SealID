@@ -14,8 +14,9 @@ green design (`src/assets/site.css`), logo `src/assets/seal-id.svg`.
 | path | purpose |
 |------|---------|
 | `src/index.php` | public profile page |
+| `src/check.php` | public checker page (1.5.0): "whose Seal ID is this domain / address?" |
 | `src/admin.php` | owner's admin (login, profile, proofs, vouching, mirrors); JSON actions via `?a=` |
-| `src/api.php` | public JSON API (bundle, status, inbox, reach) |
+| `src/api.php` | public JSON API (bundle, status, inbox, reach, lookup) |
 | `src/setup.php` | first-run setup (needs `SETUP_CODE` from `config.php`) |
 | `src/config.example.php` | copy to `config.php` (git-ignored) |
 | `src/lib/bootstrap.php` | config, data dir, security headers, CSP nonce, sessions, JSON helpers |
@@ -24,7 +25,8 @@ green design (`src/assets/site.css`), logo `src/assets/seal-id.svg`.
 | `src/lib/http.php` | SSRF-guarded HTTPS fetch + DNS TXT |
 | `src/lib/proofs.php` | proof registry, tokens, status cache, re-checks |
 | `src/lib/proofs/*.php` | one checker per service |
-| `src/lib/peers.php` | fetching/verifying other identities, pinning, vouches, inbox |
+| `src/lib/peers.php` | fetching/verifying other identities, pinning, vouches, inbox; results carry a `code` (1.5.0) |
+| `src/lib/check.php` | public checker (1.5.0): input cleanup, verdicts (pure `check_result`), cache, per-IP + global limits, owner switch (`settings.json`) |
 | `src/lib/view.php` | shared HTML (head, header, footer) |
 | `src/lib/avatar.php` | profile picture: GD re-draw, pending → signed, serving, peer fetch (1.1.0) |
 | `src/lib/update.php` | one-click updates from signed GitHub release packages, undo (1.1.0) |

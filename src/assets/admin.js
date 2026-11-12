@@ -713,6 +713,18 @@ function renderSettings(root) {
     el('p', { class: 'small muted' }, 'Asks ' + S.reach_helper + ' to fetch and verify your Seal ID from the outside, the way any other installation would.'),
     reach, reachOut));
 
+  // 1.5.0: public checker on/off
+  const pcOn = !!S.public_check;
+  const pcBtn = el('button', { class: 'btn small' + (pcOn ? ' danger' : ''), type: 'button' }, pcOn ? 'Turn the checker off' : 'Turn the checker on');
+  pcBtn.addEventListener('click', () => busy(pcBtn, async () => {
+    const r = await api('settings', { public_check: !pcOn });
+    S.public_check = r.public_check; render(); toast(r.public_check ? 'The checker is on.' : 'The checker is off.');
+  }));
+  root.append(el('div', { class: 'card stack', id: 'checker' }, el('h2', {}, 'Public checker'),
+    el('p', { class: 'small muted' }, 'Lets visitors type a domain or Seal ID address on ', el('a', { href: 'check.php', target: '_blank', rel: 'noopener' }, 'check.php'),
+      ' (and on your profile page) to see whose Seal ID it is. This server does the checking, limited to 10 checks a minute per visitor and 60 new checks every 10 minutes in total; answers are kept for 10 minutes.'),
+    el('div', { class: 'row wrapline' }, el('span', { class: 'badge ' + (pcOn ? 's-verified' : 's-pending') }, pcOn ? 'On' : 'Off'), pcBtn)));
+
   // DNS
   root.append(el('div', { class: 'card stack' }, el('h2', {}, 'DNS key record (recommended)'),
     el('p', { class: 'small muted' }, 'A TXT record lets anyone confirm your key even if your web host blocks automated requests, and stops anyone from swapping your key unnoticed.'),

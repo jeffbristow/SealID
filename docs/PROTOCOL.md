@@ -193,6 +193,7 @@ signed vouch link can be checked independently.
 | `GET ?a=status` | this server's proof statuses; re-checks a few stale ones |
 | `POST ?a=inbox` `{from, seq}` | vouch notification (rate-limited) |
 | `POST ?a=reach` `{url}` | "can you reach me?" — fetches another installation's bundle and reports what it got. Used by the setup page's reachability test (rate-limited) |
+| `GET ?a=lookup&q=…` | public checker (1.5.0): `q` is a domain or Seal ID address. Answers `{verdict, title, message, checked, checked_url, …}` with `verdict` one of `valid`, `not_confirmed`, `invalid`, `unreachable`, `none`, `bad_address`, `busy` (HTTP 429); a valid answer adds `url, name, bio, avatar, fp, algo, alias, alias_how, proofs[], verified_count, warnings[]`. CORS `*`, rate-limited, cached 10 minutes; 403 when the owner turned it off |
 
 All outgoing requests are HTTPS only, to public IP addresses only (private and
 reserved ranges are refused, the resolved address is pinned for the

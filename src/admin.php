@@ -218,6 +218,13 @@ if ($isPost) {
                 Chain::writeBundle();
                 json_out(['ok' => true] + admin_state());
 
+            case 'settings':
+                // 1.5.0: unsigned owner settings (settings.json)
+                $s = jread('settings.json', []);
+                if (array_key_exists('public_check', $b)) $s['public_check'] = (bool)$b['public_check'];
+                jwrite('settings.json', $s);
+                json_out(['ok' => true] + admin_state());
+
             case 'update_key':
                 try { Chain::updateKey((string)($b['key'] ?? '')); } catch (ChainError | PgpError $e) { fail(400, $e->getMessage()); }
                 json_out(['ok' => true] + admin_state());
@@ -401,6 +408,7 @@ function admin_state(): array
         'has_password' => !empty($auth['password']),
         'keystore' => ($ks = jread('keystore.json', null)) ? ['created' => $ks['created'] ?? 0, 'fp' => $ks['fp'] ?? null] : null,
         'reach_helper' => cfg('reach_helper', 'https://id.bristow.ch'),
+        'public_check' => check_enabled(),
         'bundle_ok' => is_file(SEALID_ROOT . '/.well-known/seal-id.json'),
         'version' => up_current(),
         'update' => up_state(),

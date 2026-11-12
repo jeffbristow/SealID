@@ -135,12 +135,13 @@ function peer_verify(string $url, bool $checkProofs = true): array
 {
     $f = peer_fetch($url);
     $base = ['ok' => false, 'url' => $url, 'attempts' => $f['attempts'], 'blocked' => $f['blocked'], 'dns' => $f['dns'], 'warnings' => []];
-    if (!$f['ok']) return $base + ['error' => $f['error']];
+    // 1.5.0: 'code' tells callers (the public checker) what kind of failure this is
+    if (!$f['ok']) return $base + ['error' => $f['error'], 'code' => $f['blocked'] ? 'blocked' : 'not_found'];
     $b = $f['bundle'];
     try {
         $st = Chain::verifyLinks($b['chain'], $b['keys'], $url);
     } catch (ChainError $e) {
-        return $base + ['error' => 'This Seal ID did not verify: ' . $e->getMessage(), 'source' => $f['source']];
+        return $base + ['error' => 'This Seal ID did not verify: ' . $e->getMessage(), 'source' => $f['source'], 'code' => 'invalid'];
     }
     $warnings = [];
     if ($f['mirror']) $warnings[] = 'Read from a mirror (' . $f['source'] . ') because the main address did not answer properly.';
@@ -153,7 +154,7 @@ function peer_verify(string $url, bool $checkProofs = true): array
         } elseif (in_array($dns['fp'], $st['fps'], true)) {
             $warnings[] = 'The DNS record still names an older key of this identity.';
         } else {
-            return $base + ['error' => 'The DNS record _seal-id.' . parse_url($url, PHP_URL_HOST) . ' names a different key (' . Pgp::formatFp($dns['fp']) . '). Someone may be impersonating this identity.', 'source' => $f['source']];
+            return $base + ['error' => 'The DNS record _seal-id.' . parse_url($url, PHP_URL_HOST) . ' names a different key (' . Pgp::formatFp($dns['fp']) . '). Someone may be impersonating this identity.', 'source' => $f['source'], 'code' => 'dns_mismatch'];
         }
     }
     // Pin comparison
@@ -214,6 +215,7 @@ function peer_verify(string $url, bool $checkProofs = true): array
         'attempts' => $f['attempts'],
         'blocked' => $f['blocked'],
         'error' => null,
+        'code' => 'ok',
     ];
 }
 
@@ -336,25 +338,39 @@ function peer_alias_targets(string $host): array
 function peer_lookup(string $input, bool $checkProofs = true): array
 {
     $url = Chain::normUrl($input);
-    if ($url === null) return ['ok' => false, 'url' => $input, 'error' => 'That is not a valid address.', 'attempts' => [], 'blocked' => false, 'warnings' => [], 'dns' => null];
+    if ($url === null) return ['ok' => false, 'url' => $input, 'error' => 'That is not a valid address.', 'code' => 'bad_address', 'attempts' => [], 'blocked' => false, 'warnings' => [], 'dns' => null];
     $r = peer_verify($url, $checkProofs);
     if ($r['ok'] || isset($r['source'])) return $r;          // a Seal ID (valid or not) answered here
     $host = (string)parse_url($url, PHP_URL_HOST);
     if (parse_url($url, PHP_URL_PATH)) return $r;            // aliases are bare domains
     $tried = [];
+    $failed = null;                                          // 1.5.0: a target that couldn't be checked
     foreach (peer_alias_targets($host) as [$target, $token, $how]) {
         if (isset($tried[$target]) || $target === $url) continue;
         $tried[$target] = true;
         $t = peer_verify($target, true);
-        if (!$t['ok']) continue;
+        if (!$t['ok']) { $failed ??= $t; continue; }
         foreach ($t['proofs'] as $p) {
             if (in_array($p['service'], ['web', 'dns'], true) && $p['handle'] === $host && $p['status'] === 'verified' && ($token === null || $token === $p['token'])) {
                 $t['alias'] = $host;
+                $t['alias_how'] = $how;                      // 'web' (proof file) or 'dns' (TXT record)
                 array_unshift($t['warnings'], "$host is a verified alias of this Seal ID.");
                 return $t;
             }
         }
+        $failed = null;                                      // a working Seal ID answered but doesn't confirm $host
     }
-    if ($tried) $r['error'] = "$host points to a Seal ID, but that Seal ID has no verified proof for $host — so it is not a valid alias.";
+    if ($tried) {
+        $r['claimed'] = array_keys($tried);
+        if ($failed !== null && count($tried) === 1) {
+            // The only Seal ID $host points to couldn't be checked: say so instead of calling it fake.
+            $r['error'] = "$host points to the Seal ID {$failed['url']}, but it could not be checked: " . $failed['error'];
+            $r['code'] = $failed['code'] ?? 'not_found';
+            $r['blocked'] = $failed['blocked'];
+        } else {
+            $r['error'] = "$host points to a Seal ID, but that Seal ID has no verified proof for $host — so it is not a valid alias.";
+            $r['code'] = 'not_confirmed';
+        }
+    }
     return $r;
 }

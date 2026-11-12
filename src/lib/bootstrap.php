@@ -5,7 +5,7 @@
  */
 declare(strict_types=1);
 
-const SEALID_VERSION = '1.4.0';
+const SEALID_VERSION = '1.5.0';
 const SEALID_REPO = 'https://github.com/jeffbristow/SealID';
 define('SEALID_ROOT', dirname(__DIR__));
 
@@ -24,6 +24,7 @@ require_once __DIR__ . '/view.php';
 require_once __DIR__ . '/avatar.php';
 require_once __DIR__ . '/update.php';
 require_once __DIR__ . '/favicon.php';
+require_once __DIR__ . '/check.php';
 
 function cfg(string $key, mixed $default = null): mixed
 {

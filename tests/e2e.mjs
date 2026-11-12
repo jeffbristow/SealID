@@ -229,6 +229,30 @@ ok('password login', r.ok, r.error);
 b = await (await req('.well-known/seal-id.json')).json();
 ok('final bundle has 11 links', b.chain.length === 11, String(b.chain.length));
 
+// 1.5.0: public checker (offline-safe: only inputs that need no outside lookups)
+r = await post('admin.php?a=state', {});
+ok('checker on by default', r.public_check === true, String(r.public_check));
+p = await page('index.php');
+ok('profile has the check form', p.html.includes('action="check.php"') && p.html.includes('Check a Seal ID'));
+p = await page('check.php');
+ok('check page loads', p.status === 200 && p.html.includes('name="q"'));
+p = await page('check.php?q=' + encodeURIComponent('not a domain'));
+ok('check page: bad input explained', p.html.includes('Not a valid address'));
+const lk = await (await req('api.php?a=lookup&q=' + encodeURIComponent('<script>'))).json();
+ok('lookup API: bad input', lk.verdict === 'bad_address' && !('fp' in lk), JSON.stringify(lk).slice(0, 200));
+p = await page('check.php?q=' + encodeURIComponent('"><script>alert(1)</script>'));
+ok('check page escapes the query', !p.html.includes('<script>alert(1)') && p.html.includes('&lt;script&gt;'));
+r = await post('admin.php?a=settings', { public_check: false });
+ok('checker turned off', r.ok && r.public_check === false, r.error);
+const off = await req('api.php?a=lookup&q=example.com');
+ok('lookup API refuses when off', off.status === 403, String(off.status));
+p = await page('check.php?q=example.com');
+ok('check page says it is off', p.html.includes('turned the public checker off') && !p.html.includes('name="q"'));
+p = await page('index.php');
+ok('profile hides the form when off', !p.html.includes('action="check.php"'));
+r = await post('admin.php?a=settings', { public_check: true });
+ok('checker back on', r.ok && r.public_check === true, r.error);
+
 // Leave a few proofs in place for looking at the UI (DEMO=1)
 if (process.env.DEMO) {
   for (const [service, handle] of [['dns', 'example.com'], ['github', 'octocat'], ['facebook', 'example.person']]) {

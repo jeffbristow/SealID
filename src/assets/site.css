@@ -207,3 +207,25 @@ li.drop-above { box-shadow: inset 0 2px 0 var(--accent); }
 .seg { flex-wrap: wrap; max-width: 100%; }
 .keyfile { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-3); }
 .keyfile .btn { white-space: nowrap; }
+
+/* 1.5.0: public checker (check.php, profile card) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.check-form { display: flex; gap: 10px; align-items: stretch; }
+.check-form input { flex: 1; min-width: 0; }
+.check-form .btn { flex: none; }
+.check-card h1 { margin-bottom: 0; }
+.verdict { border-width: 1px; border-style: solid; }
+.verdict-ok { border-color: rgba(60, 207, 145, .55); }
+.verdict-bad { border-color: rgba(255, 100, 100, .6); }
+.verdict-warn { border-color: rgba(240, 180, 69, .6); }
+.verdict-head { display: flex; gap: 14px; align-items: center; }
+.verdict-head h2 { margin: 0; }
+.verdict-sym { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; font-weight: 700; background: var(--bg-4); color: var(--text-2); }
+.verdict-ok .verdict-sym { background: rgba(60, 207, 145, .15); color: var(--accent); }
+.verdict-bad .verdict-sym { background: rgba(255, 100, 100, .15); color: var(--red); }
+.verdict-warn .verdict-sym { background: rgba(240, 180, 69, .15); color: var(--amber); }
+.check-id { margin: 4px 0 0; }
+.check-id .who-name { font-size: 20px; font-weight: 650; }
+.check-id .idurl { display: inline-block; word-break: break-all; }
+@media (max-width: 520px) { .check-form { flex-direction: column; } }
+.verdict code { white-space: nowrap; }
