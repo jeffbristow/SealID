@@ -19,7 +19,7 @@ if ($res && $res['verdict'] === 'busy') http_response_code(429);
 $owner = $st['name'] !== '' ? $st['name'] : parse_url($st['url'], PHP_URL_HOST);
 page_start($q !== '' ? 'Check ' . $q . ' — Seal ID' : 'Check a Seal ID', [
     'noindex' => $q !== '',
-    'description' => 'Check whether a domain or Seal ID address is a valid Seal ID, and whose it is.',
+    'description' => 'Check whether a domain or Seal ID page address is a valid Seal ID, and whose it is.',
     'nav' => '<a href="./">' . h($owner) . '’s Seal ID</a>',
 ]);
 
@@ -37,13 +37,13 @@ function verdict_style(string $v): array
 <main class="wrap section">
   <div class="card stack check-card">
     <h1>Check a Seal ID</h1>
-    <p class="muted">Type a domain (like <code>example.com</code>) or a Seal ID address. This server fetches it, checks every signature and re-checks its proofs, then tells you whose Seal ID it is or whether something is wrong.</p>
+    <p class="muted">Type a domain (like <code>example.com</code>) or the address of someone’s Seal ID page (like <code>id.example.com</code>). This server fetches it, checks every signature and re-checks its proofs, then tells you whose Seal ID it is or whether something is wrong.</p>
     <?php if (!$on): ?>
       <div class="notice warn">The owner of this Seal ID has turned the public checker off.</div>
     <?php else: ?>
     <form class="check-form" method="get" action="check.php" role="search">
-      <label for="q" class="sr-only">Domain or Seal ID address</label>
-      <input type="text" id="q" name="q" value="<?= h($q) ?>" placeholder="example.com or https://id.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" maxlength="200" required>
+      <label for="q" class="sr-only">Domain or Seal ID page address</label>
+      <input type="text" id="q" name="q" value="<?= h($q) ?>" placeholder="example.com or id.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" maxlength="200" required>
       <button class="btn primary" type="submit">Check</button>
     </form>
     <p class="tiny faint">Checks can take a few seconds. Results are kept for up to 10 minutes.</p>

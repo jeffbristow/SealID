@@ -15,7 +15,7 @@ verifies every signature and re-checks every proof itself. When you've checked
 someone, you can **vouch** for them — a signed statement that shows up on both
 profiles.
 
-Anyone can check one, too: type a domain or Seal ID address into the
+Anyone can check one, too: type a domain or the address of a Seal ID page into the
 **checker** on any Seal ID's profile page (`check.php`) to see whose Seal ID it
 is, or whether something is wrong with it (1.5.0).
 

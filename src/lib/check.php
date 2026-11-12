@@ -78,7 +78,7 @@ function check_global_ok(): bool
 function check_lookup(string $q, bool $limits = true): array
 {
     $url = check_normalize($q);
-    if ($url === null) return check_result($q, null, ['ok' => false, 'code' => 'bad_address', 'error' => 'Type a domain such as example.com or a Seal ID address such as https://id.example.com.']);
+    if ($url === null) return check_result($q, null, ['ok' => false, 'code' => 'bad_address', 'error' => 'Type a domain such as example.com, or the address of someone’s Seal ID page such as id.example.com.']);
     if ($limits && !rate_limit('check', CHECK_PER_IP[0], CHECK_PER_IP[1])) {
         return check_result($q, $url, ['ok' => false, 'code' => 'busy', 'error' => 'Too many checks from your connection. Wait a minute and try again.']) + ['cached' => false];
     }

@@ -130,10 +130,10 @@ page_start($name . ' — Seal ID', [
   <?php if (check_enabled()): ?>
   <div class="card section stack" id="check">
     <h2>Check a Seal ID</h2>
-    <p class="muted small">Got a domain or a Seal ID address from someone? Type it here to see whose Seal ID it is, or whether something is wrong with it.</p>
+    <p class="muted small">Got a domain or a Seal ID page address from someone? Type it here to see whose Seal ID it is, or whether something is wrong with it.</p>
     <form class="check-form" method="get" action="check.php" role="search">
-      <label for="q" class="sr-only">Domain or Seal ID address</label>
-      <input type="text" id="q" name="q" placeholder="example.com or https://id.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" maxlength="200" required>
+      <label for="q" class="sr-only">Domain or Seal ID page address</label>
+      <input type="text" id="q" name="q" placeholder="example.com or id.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" maxlength="200" required>
       <button class="btn primary" type="submit">Check</button>
     </form>
   </div>
