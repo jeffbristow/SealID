@@ -10,6 +10,8 @@ return [
 
     // Where Seal ID keeps its data. Default: a ".sealid-data" folder NEXT TO
     // the install folder (outside the web root). Use an absolute path to change it.
+    // Running more than one Seal ID on one account? Give each its own folder
+    // (1.5.2+ refuses to use a folder that belongs to another Seal ID).
     'data_dir' => null,
 
     // Who tests "can other Seal IDs reach you?" from the outside.

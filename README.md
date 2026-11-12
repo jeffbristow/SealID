@@ -72,6 +72,20 @@ Requirements: PHP 8.1+ with the `curl`, `sodium` and `openssl` extensions
 Seal ID keeps its data in a `.sealid-data` folder **next to** the install
 folder (outside the web root). Set `data_dir` in `config.php` to change that.
 
+**More than one Seal ID on one hosting account (1.5.2).** Each Seal ID needs
+its own data folder. Since 1.5.2 every data folder remembers which install
+owns it (`install.json`), so a second install never uses another's data:
+
+- Without `data_dir`, a second install next to the first (say `~/id` and
+  `~/id_other`) finds `.sealid-data` taken and uses `.sealid-data-id_other`.
+- With `data_dir` pointing at another install's folder, it refuses to start
+  and says why, rather than showing (and letting you change) the other identity.
+- Moving an install to a new folder keeps its data, as long as the old folder
+  is gone.
+
+Setting `data_dir` for each install is still the clearest choice. If the first
+install is older than 1.5.2, update it before adding the second.
+
 ### Updates
 
 From 1.1.0, Seal ID updates itself with one click: **Admin → Settings → Updates**.
