@@ -15,6 +15,10 @@ return [
     // Who tests "can other Seal IDs reach you?" from the outside.
     'reach_helper' => 'https://id.bristow.ch',
 
+    // 1.5.0: the public checker (check.php). Default on; the switch in
+    // Admin → Settings overrides this once used.
+    'public_check' => true,
+
     // How often (hours) verified proofs are re-checked when the profile is viewed.
     'recheck_hours' => 6,
 
